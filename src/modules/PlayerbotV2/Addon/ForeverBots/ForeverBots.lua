@@ -11,6 +11,231 @@ frame as it does for typed commands.
 local ADDON = ...
 ForeverBotsDB = ForeverBotsDB or {}
 
+-- Interface language. A ruRU client gets Russian buttons, tooltips and messages; every other client keeps the English ones.
+-- T(text) is the Russian text for an English key (the English text itself when there is none, so a missing entry only shows
+-- English). The commands the add-on sends to the server stay English: they work on every client.
+local RU_CLIENT = GetLocale and GetLocale() == "ruRU"
+local RU = {
+    ["Warrior"] = "Воин",
+    ["Paladin"] = "Паладин",
+    ["Shaman"] = "Шаман",
+    ["Hunter"] = "Охотник",
+    ["Rogue"] = "Разбойник",
+    ["Priest"] = "Жрец",
+    ["Mage"] = "Маг",
+    ["Warlock"] = "Чернокнижник",
+    ["Druid"] = "Друид",
+    ["Tank"] = "Танк",
+    ["Heal"] = "Хил",
+    ["DPS"] = "Урон",
+    ["party"] = "группы",
+    ["raid"] = "рейда",
+    ["on"] = "вкл",
+    ["off"] = "выкл",
+    ["ON"] = "ВКЛ",
+    ["OFF"] = "ВЫКЛ",
+    ["auto"] = "авто",
+    ["tank"] = "танк",
+    ["cc"] = "CC",
+    ["kill"] = "убить",
+    ["star"] = "звезда",
+    ["circle"] = "круг",
+    ["diamond"] = "ромб",
+    ["triangle"] = "треугольник",
+    ["moon"] = "луна",
+    ["square"] = "квадрат",
+    ["cross"] = "крест",
+    ["skull"] = "череп",
+    ["Passive"] = "Пассив",
+    ["Aggressive"] = "Агрессия",
+    ["Auto"] = "Авто",
+    ["Aggress."] = "Агресс.",
+    ["Role:"] = "Роль:",
+    ["Marker:"] = "Метка:",
+    ["Now:"] = "Сейчас:",
+    ["%d yd"] = "%d яр.",
+    ["%d yards"] = "%d яр.",
+    ["it"] = "он",
+    ["shown"] = "показаны",
+    ["hidden (shown in the Bots panel status line)"] = "скрыты (видны в строке состояния панели бота)",
+    ["Add bots"] = "Добавить ботов",
+    ["Add bots  >"] = "Добавить  >",
+    ["Add bots  <"] = "Добавить  <",
+    ["Opens a list beside this window: choose the gear, then click a class and role. The new bot joins you at your level."] = "Открывает список рядом с окном: выберите снаряжение, затем щёлкните класс и роль. Новый бот присоединится к вам на вашем уровне.",
+    ["Raid ready"] = "Рейд готов",
+    ["Calls your saved bots, makes the group a raid if it needs one, sets the formation and spacing, and starts a ready check once the bots have buffed. Target your main tank first to set the Main Tank flag too. Not in combat."] = "Вызывает ваших сохранённых ботов, преобразует группу в рейд при необходимости, задаёт построение и интервал и запускает проверку готовности, когда боты наложат баффы. Чтобы назначить и главного танка, сначала выберите его целью. Не в бою.",
+    ["Area spells"] = "Массовые заклинания",
+    ["The bots use their area spells whenever they can."] = "Боты применяют массовые заклинания при любой возможности.",
+    ["The bots use area spells only when several mobs are close together."] = "Боты применяют массовые заклинания, только когда рядом несколько мобов.",
+    ["Click to switch."] = "Щёлкните, чтобы переключить.",
+    ["Crowd control"] = "Контроль (CC)",
+    ["The bots crowd-control the mobs you mark (give a bot and a mob the same icon, see Assign a bot to an icon)."] = "Боты контролируют помеченных вами мобов (поставьте боту и мобу одинаковый значок, см. «Назначить бота на значок»).",
+    ["The bots leave marked mobs alone: no crowd control."] = "Боты не трогают помеченных мобов: контроля нет.",
+    ["add a bot first: the area-spell setting goes to your group."] = "сначала добавьте бота: настройка массовых заклинаний отправляется вашей группе.",
+    ["Orders to the group"] = "Приказы группе",
+    ["Everything below goes to all your bots."] = "Всё ниже относится ко всем вашим ботам.",
+    ["Follow"] = "За мной",
+    ["Stay"] = "Стой",
+    ["Attack"] = "Атака",
+    ["Resume"] = "Вольно",
+    ["Bots follow you and only defend. They do not advance or pull until you say Attack, Pull or Resume."] = "Боты следуют за вами и только защищаются. Они не идут вперёд и не тянут, пока вы не скажете «Атака», «Пулл» или «Вольно».",
+    ["Bots hold where they stand."] = "Боты остаются там, где стоят.",
+    ["Bots attack your target."] = "Боты атакуют вашу цель.",
+    ["Hand the fight back: bots go on with their normal play."] = "Вернуть бой ботам: они снова действуют самостоятельно.",
+    ["Pull"] = "Пулл",
+    ["Pull back"] = "Оттяжка",
+    ["Stop"] = "Стоп",
+    ["Flee"] = "Бежать",
+    ["Come"] = "Ко мне",
+    ["Your tank bots open on your target; the rest join once it is engaged."] = "Боты-танки начинают бой с вашей цели; остальные присоединяются, когда она вступит в бой.",
+    ["The main tank bot opens on your target from range, runs back to the rally point (or where it stood) and tanks it there, so nothing else aggros."] = "Главный танк-бот начинает бой с вашей цели издалека, убегает к точке сбора (или туда, где стоял) и танкует её там, чтобы никто другой не собрал агро.",
+    ["Bots stop attacking and go back to normal."] = "Боты прекращают атаку и возвращаются к обычному поведению.",
+    ["Bots break off and run to you."] = "Боты выходят из боя и бегут к вам.",
+    ["Bots teleport to you."] = "Боты телепортируются к вам.",
+    ["Stance"] = "Режим",
+    ["Auto: nothing sent yet outside an instance, the bots use their own default. Inside an instance the panel sends Passive until you pick. Passive: bots start nothing and only defend. Aggressive: they attack anything hostile within about 10 yards of you. Shows what you last sent; it is sent again to every bot that joins."] = "Авто: пока ничего не отправлено (вне подземелья), боты действуют по умолчанию. В подземелье панель отправляет «Пассив», пока вы не выберете режим. Пассив: боты ничего не начинают и только защищаются. Агрессия: боты нападают на любого врага в радиусе около 10 ярдов от вас. Кнопка показывает последний отправленный режим; он отправляется заново каждому присоединившемуся боту.",
+    ["After a wipe or to regroup"] = "После вайпа или для перегруппировки",
+    ["Release"] = "Отпустить",
+    ["Fall back"] = "Отход",
+    ["Set rally"] = "Сбор здесь",
+    ["After a wipe: every dead bot releases, runs back to its corpse and rejoins you. Living bots ignore it."] = "После вайпа: каждый погибший бот отпускает дух, бежит к своему телу и возвращается к вам. Живые боты это игнорируют.",
+    ["Every bot drops the fight and runs to the rally point, then re-forms there. It fights only what follows until you say Attack, Pull or Resume."] = "Все боты бросают бой и бегут к точке сбора, затем перестраиваются там. Они сражаются только с теми, кто последует за ними, пока вы не скажете «Атака», «Пулл» или «Вольно».",
+    ["Sets the rally point to where you stand (used by Fall back and Pull back)."] = "Назначает точкой сбора место, где вы стоите (используется приказами «Отход» и «Оттяжка»).",
+    ["Formation and spacing"] = "Построение и интервал",
+    ["Circle"] = "Круг",
+    ["Arrow"] = "Стрелка",
+    ["Line"] = "Линия",
+    ["No form."] = "Нет",
+    ["No formation"] = "Без построения",
+    ["Out of combat the bots stand in a ring round you."] = "Вне боя боты стоят кольцом вокруг вас.",
+    ["Out of combat the bots form an arrow pointing the way you face."] = "Вне боя боты строятся стрелой в направлении вашего взгляда.",
+    ["Out of combat the bots line up abreast behind you."] = "Вне боя боты выстраиваются в линию позади вас.",
+    ["The plain follow behind you."] = "Обычное следование позади вас.",
+    ["Tight"] = "Плотно",
+    ["Close"] = "Обычно",
+    ["Spread"] = "Широко",
+    ["Tight spacing"] = "Плотный интервал",
+    ["Close spacing"] = "Обычный интервал",
+    ["Spread spacing"] = "Широкий интервал",
+    ["About 2.5 yards between bots."] = "Около 2,5 ярда между ботами.",
+    ["About 4 yards between bots (the default)."] = "Около 4 ярдов между ботами (по умолчанию).",
+    ["About 8 yards between bots."] = "Около 8 ярдов между ботами.",
+    ["Follow distance"] = "Дистанция",
+    ["How far the bots follow you out of combat, 1 to 20 yards. Also sets the formation spacing."] = "Как далеко боты следуют за вами вне боя, от 1 до 20 ярдов. Также задаёт интервал построения.",
+    ["Tanks and markers"] = "Танки и метки",
+    ["Make main tank"] = "Главный танк",
+    ["Give to tank"] = "Метку танку",
+    ["Clear tanks"] = "Сброс танков",
+    ["Sets the raid Main Tank flag on the raid member you target. Raid groups only."] = "Назначает флаг «Главный танк» рейдовому игроку, которого вы выбрали целью. Только в рейдовых группах.",
+    ["Marker"] = "Метка",
+    ["Click to cycle the marker (skull, cross, star, circle, diamond, triangle, moon, square) the next button hands out."] = "Щёлкните, чтобы выбрать метку (череп, крест, звезда, круг, ромб, треугольник, луна, квадрат), которую выдаст следующая кнопка.",
+    ["Give marker to tank"] = "Выдать метку танку",
+    ["The tank bot you target holds whichever mob carries this marker (mark the mob yourself with the raid icons)."] = "Выбранный вами бот-танк держит любого моба с этой меткой (метьте мобов сами рейдовыми значками).",
+    ["Back to the automatic tank split."] = "Возврат к автоматическому распределению танков.",
+    ["Assign a bot to an icon"] = "Назначить бота на значок",
+    ["Target a bot, left-click an icon. Right-click clears it."] = "Выберите бота целью и щёлкните значок. Правый щелчок снимает значок.",
+    ["Click: assign the targeted bot"] = "Щелчок: назначить выбранного бота",
+    ["Right-click: clear this icon"] = "Правый щелчок: снять этот значок",
+    ["Click: this bot takes this icon"] = "Щелчок: бот получает этот значок",
+    ["Right-click: clear it"] = "Правый щелчок: снять значок",
+    ["Role"] = "Роль",
+    ["auto: a tank bot tanks the mob with that icon, casters crowd-control it until a skull goes on, the rest kill it first. Click to force tank, cc or kill for the next assignment."] = "авто: бот-танк танкует моба с этим значком, заклинатели держат его в контроле, пока не появится череп, остальные убивают его первым. Щёлкните, чтобы выбрать tank (танк), cc (контроль) или kill (убийство) для следующего назначения.",
+    ["Clear all"] = "Очистить",
+    ["Refresh"] = "Обновить",
+    ["No assignments."] = "Назначений нет.",
+    ["no assignments."] = "назначений нет.",
+    ["Target a bot first."] = "Сначала выберите бота.",
+    ["target one of your bots first, then left-click an icon."] = "сначала выберите одного из ваших ботов, затем щёлкните значок.",
+    ["target the bot you want to delete first."] = "сначала выберите бота, которого хотите удалить.",
+    ["Cleared all, asking the server..."] = "Всё снято, запрашиваю сервер...",
+    ["Cleared %s, asking the server..."] = "Значок «%s» снят, запрашиваю сервер...",
+    ["Sent: %s on %s, waiting for the server..."] = "Отправлено: %s на значок «%s», жду ответ сервера...",
+    ["sent: %s on %s%s, waiting for the server to confirm."] = "отправлено: %s на значок «%s»%s, жду подтверждения сервера.",
+    ["Confirmed: %s: %s on %s"] = "Подтверждено: %s: %s, значок «%s»",
+    ["confirmed: %s: %s on %s"] = "подтверждено: %s: %s, значок «%s»",
+    ["The server did not confirm %s on %s."] = "Сервер не подтвердил назначение: %s, значок «%s».",
+    ["the server did not confirm %s on %s (is it your bot, in your group?)."] = "сервер не подтвердил назначение: %s, значок «%s» (это ваш бот и он в вашей группе?).",
+    ["The server answered but the client hid the reply (restricted chat)."] = "Сервер ответил, но клиент скрыл ответ (ограниченный чат).",
+    ["+%d more (/fb assign list)"] = "ещё %d (/fb assign list)",
+    ["Your bots"] = "Ваши боты",
+    ["The bots you keep between sessions."] = "Боты, которых вы сохраняете между сеансами.",
+    ["Call saved"] = "Вызвать",
+    ["Save group"] = "Сохранить",
+    ["Dismiss all"] = "Распустить",
+    ["Unsave all"] = "Забыть всех",
+    ["Delete target"] = "Удалить цель",
+    ["List"] = "Список",
+    ["Regear all"] = "Переодеть",
+    ["Brings your saved bots, and every bot in your group, to you."] = "Приводит к вам ваших сохранённых ботов и всех ботов вашей группы.",
+    ["Puts every bot with you on your saved list."] = "Заносит всех ботов, что с вами, в список сохранённых.",
+    ["Sends all your bots away."] = "Отпускает всех ваших ботов.",
+    ["Empties your saved list."] = "Очищает список сохранённых.",
+    ["Deletes the targeted bot's character for good (asks first)."] = "Навсегда удаляет персонажа выбранного бота (сначала спросит).",
+    ["Lists your bots in chat (saved ones are marked)."] = "Выводит список ваших ботов в чат (сохранённые отмечены).",
+    ["Re-rolls the gear of your saved bots so they do not all wear the same pieces. Better pieces they already wear stay."] = "Подбирает заново снаряжение ваших сохранённых ботов, чтобы они не носили одинаковые вещи. Лучшие надетые вещи остаются.",
+    ["Delete %s for good? Its character is removed."] = "Удалить бота %s навсегда? Его персонаж будет удалён.",
+    ["Select gear"] = "Выбор снаряжения",
+    ["Add a bot"] = "Добавить бота",
+    ["Match"] = "Как я",
+    ["Best"] = "Лучшее",
+    ["BiS"] = "BiS",
+    ["T1"] = "T1",
+    ["T2"] = "T2",
+    ["T3"] = "T3",
+    ["Match my gear"] = "Как у меня",
+    ["Best for their level"] = "Лучшее для их уровня",
+    ["Best in slot"] = "Лучшее в слот (BiS)",
+    ["Tier 1"] = "Тир 1",
+    ["Tier 2"] = "Тир 2",
+    ["Tier 3"] = "Тир 3",
+    ["Gear for the bots you add next."] = "Снаряжение для ботов, которых вы добавите следующими.",
+    ["A new bot joins you at your level."] = "Новый бот присоединится к вам на вашем уровне.",
+    ["Dismiss"] = "Уйти",
+    ["No answer: is %s your bot?"] = "Нет ответа: %s — ваш бот?",
+    ["Whisper (Forever Bots)"] = "Шепнуть (Forever Bots)",
+    ["Invite (Forever Bots)"] = "Пригласить (Forever Bots)",
+    ["invite sent to %s (%s)"] = "приглашение отправлено: %s (%s)",
+    ["could not send the invite; type /invite %s"] = "не удалось отправить приглашение; введите /invite %s",
+    ["cannot invite %s (the game says you may not invite right now)"] = "нельзя пригласить %s (игра сейчас не разрешает приглашать)",
+    ["Show / hide the bot window"] = "Показать / скрыть окно ботов",
+    ["Toggle stance (Passive / Aggressive)"] = "Переключить режим (Пассив / Агрессия)",
+    ["Attack (your target)"] = "Атака (ваша цель)",
+    ["Stop attacking"] = "Прекратить атаку",
+    ["Attack (mouseover)"] = "Атака (цель под курсором)",
+    ["you have no group yet: add a bot first."] = "у вас ещё нет группы: сначала добавьте бота.",
+    ["the order could not be sent in combat%s: press Enter to send it."] = "приказ нельзя отправить в бою%s: нажмите Enter, чтобы отправить его.",
+    ["the order could not be sent in combat%s: type it in %s chat."] = "приказ нельзя отправить в бою%s: введите его в чат %s.",
+    ["raid ready: not in combat."] = "рейд готов: нельзя в бою.",
+    ["raid ready: this client has no timers; use /fb call all."] = "рейд готов: в этом клиенте нет таймеров; используйте /fb call all.",
+    ["raid ready: ready check sent."] = "рейд готов: проверка готовности отправлена.",
+    ["raid ready: done (only the leader can start a ready check)."] = "рейд готов: готово (проверку готовности может начать только лидер).",
+    ["raid ready: %d in the group, formation set. Ready check in 20 seconds."] = "рейд готов: в группе %d, построение задано. Проверка готовности через 20 секунд.",
+    ["raid ready: no bots joined. Save a group with /fb save all first."] = "рейд готов: боты не пришли. Сначала сохраните группу командой /fb save all.",
+    ["raid ready: calling your saved bots..."] = "рейд готов: вызываю ваших сохранённых ботов...",
+    ["stance:"] = "режим:",
+    ["type /fb for the bot window."] = "введите /fb, чтобы открыть окно ботов.",
+    ["bot confirmations in chat: %s  (/fb chat on|off)"] = "подтверждения ботов в чате: %s  (/fb chat on|off)",
+    ["bot panel is %s. /fb bot on|off"] = "панель бота: %s. /fb bot on|off",
+    ["/w <name> <message> whispers a player"] = "/w <имя> <сообщение> шепчет игроку",
+    ["type /w %s <message> to whisper"] = "чтобы шепнуть, введите /w %s <сообщение>",
+    ["whisper to %s failed: %s"] = "не удалось шепнуть игроку %s: %s",
+    ["distance: %s. /fb distance <1-20> sets how far the bots follow you."] = "дистанция: %s; командой /fb distance <1-20> задаётся, как далеко боты следуют за вами.",
+    ["/fb opens the window; /fb add <class> [tank|healer|dps]; /fb raidready; /fb call|dismiss|save|unsave|regear [name|all]; /fb delete <name>; /fb list; /fb fallback; /fb pullback; /fb rally; /fb formation circle|arrow|line|none; /fb spacing tight|close|spread; /fb distance <1-20>; /fb maintank [name]; /fb bot on|off; /fb tank <name> <marker>|clear; /fb assign <name> <marker> [role]|clear|list; /fb debug on|off"] = "/fb открывает окно; /fb add <класс> [tank|healer|dps]; /fb raidready; /fb call|dismiss|save|unsave|regear [имя|all]; /fb delete <имя>; /fb list; /fb fallback; /fb pullback; /fb rally; /fb formation circle|arrow|line|none; /fb spacing tight|close|spread; /fb distance <1-20>; /fb maintank [имя]; /fb bot on|off; /fb tank <имя> <метка>|clear; /fb assign <имя> <метка> [роль]|clear|list; /fb debug on|off. Команды сервера остаются английскими: warrior, priest, tank, healer, dps.",
+    ["battleground: the whisper to %s could not be sent%s; right-click %s and choose Whisper (Forever Bots)"] = "поле боя: не удалось отправить шёпот игроку %s%s; щёлкните %s правой кнопкой и выберите «Шепнуть (Forever Bots)»",
+    [" (type /w %s <message>)"] = " (введите /w %s <сообщение>)",
+    ["/fb assign <name|target> <star|circle|diamond|triangle|moon|square|cross|skull> [tank|cc|kill]; /fb assign clear [marker|name]; /fb assign list"] = "/fb assign <имя|target> <star|circle|diamond|triangle|moon|square|cross|skull> [tank|cc|kill]; /fb assign clear [метка|имя]; /fb assign list",
+    ["/fb tank <name> <skull|cross|star|circle|diamond|triangle|moon|square|clear>; /fb tank clear"] = "/fb tank <имя> <skull|cross|star|circle|diamond|triangle|moon|square|clear>; /fb tank clear",
+    ["Whisper/Invite entries in the portrait right-click menu: %s (takes effect after /reload)  (/fb menu on|off)"] = "пункты «Шепнуть/Пригласить» в меню портрета: %s (вступит в силу после /reload)  (/fb menu on|off)",
+}
+local function T(text)
+    if RU_CLIENT then return RU[text] or text end
+    return text
+end
+-- The raid icon words the server speaks (star ... skull) as the player reads them.
+local function IconLabel(word) return T(word) end
+-- "Role: auto" for the role button; the role words stay English towards the server.
+local function RoleText(role) return T("Role:") .. " " .. T(role) end
+
 -- This client hands tainted addon code "secret" strings for some units (an enemy NPC in combat) and some chat. A secret
 -- value cannot be compared, concatenated or matched, so every name that comes from the game goes through SafeName / SafeStr
 -- first and a secret one is treated as "not a bot": nothing in the menu or panel path touches it.
@@ -66,11 +291,11 @@ end
 -- change timer below) and "Auto" elsewhere (nothing sent, the bots use their own default).
 local function StanceLabel()
     local stance = ForeverBotsDB and ForeverBotsDB.stance
-    if stance == "aggressive" then return "Aggressive" end
-    if stance == "passive" then return "Passive" end
+    if stance == "aggressive" then return T("Aggressive") end
+    if stance == "passive" then return T("Passive") end
     local okI, inInstance = pcall(IsInInstance)
-    if okI and inInstance then return "Passive" end
-    return "Auto"
+    if okI and inInstance then return T("Passive") end
+    return T("Auto")
 end
 local stanceBtn
 local function RefreshStance()
@@ -102,7 +327,7 @@ local function GroupOrder(text, attempt)
     if IsInRaid and IsInRaid() then channel = "RAID"
     elseif (IsInGroup and IsInGroup()) or (GetNumPartyMembers and GetNumPartyMembers() > 0) then channel = "PARTY"
     else
-        Print("you have no group yet: add a bot first.")
+        Print(T("you have no group yet: add a bot first."))
         return
     end
     local code, errText
@@ -126,9 +351,9 @@ local function GroupOrder(text, attempt)
         -- available to the Blizzard UI", so a retry prints the hint instead.
         if attempt == 0 and ChatFrame_OpenChat then
             ChatFrame_OpenChat((channel == "RAID" and "/raid " or "/party ") .. text)
-            Print("the order could not be sent in combat" .. why .. ": press Enter to send it.")
+            Print(string.format(T("the order could not be sent in combat%s: press Enter to send it."), why))
         else
-            Print("the order could not be sent in combat" .. why .. ": type it in " .. strlower(channel) .. " chat.")
+            Print(string.format(T("the order could not be sent in combat%s: type it in %s chat."), why, T(strlower(channel))))
         end
         return
     end
@@ -154,7 +379,7 @@ local function Now() return GetTime and GetTime() or 0 end
 
 local function ShowDistance()
     if distText then
-        distText:SetText(ForeverBotsDB.distance and (ForeverBotsDB.distance .. " yd") or "auto")
+        distText:SetText(ForeverBotsDB.distance and string.format(T("%d yd"), ForeverBotsDB.distance) or T("auto"))
     end
 end
 
@@ -189,7 +414,7 @@ end
 
 -- Deletes the targeted companion for good, after a confirmation.
 StaticPopupDialogs["FOREVERBOTS_DELETE"] = {
-    text = "Delete %s for good? Its character is removed.",
+    text = T("Delete %s for good? Its character is removed."),
     button1 = YES,
     button2 = NO,
     OnAccept = function(_, name) ServerCommand(".bot delete " .. name) end,
@@ -201,7 +426,7 @@ StaticPopupDialogs["FOREVERBOTS_DELETE"] = {
 local function DeleteTarget()
     local name = UnitExists("target") and UnitIsPlayer("target") and SafeName("target")
     if not name or UnitIsUnit("target", "player") then
-        Print("target the bot you want to delete first.")
+        Print(T("target the bot you want to delete first."))
         return
     end
     local dialog = StaticPopup_Show("FOREVERBOTS_DELETE", name)
@@ -246,12 +471,12 @@ local function RefreshList()
         local a = assignments[i]
         if a and i <= MAX_LIST then
             if i == MAX_LIST and #assignments > MAX_LIST then
-                fs:SetText("+" .. (#assignments - MAX_LIST + 1) .. " more (/fb assign list)")
+                fs:SetText(string.format(T("+%d more (/fb assign list)"), #assignments - MAX_LIST + 1))
             else
-                fs:SetText("|T" .. ICON_TEX .. (a.marker + 1) .. ":14|t  " .. a.name .. "  |cff9d9d9d" .. a.role .. "|r")
+                fs:SetText("|T" .. ICON_TEX .. (a.marker + 1) .. ":14|t  " .. a.name .. "  |cff9d9d9d" .. T(a.role) .. "|r")
             end
         else
-            fs:SetText(i == 1 and "|cff9d9d9dNo assignments.|r" or "")
+            fs:SetText(i == 1 and ("|cff9d9d9d" .. T("No assignments.") .. "|r") or "")
         end
     end
 end
@@ -294,21 +519,22 @@ end
 local function AssignTarget(marker, button)   -- marker 1..8; right-click clears the icon
     if not (UnitExists("target") and UnitIsPlayer("target") and not UnitIsUnit("target", "player")
             and UnitIsFriend("player", "target")) then
-        Print("target one of your bots first, then left-click an icon."); SetStatus("|cffff4040Target a bot first.|r")
+        Print(T("target one of your bots first, then left-click an icon.")); SetStatus("|cffff4040" .. T("Target a bot first.") .. "|r")
         return
     end
     local name = SafeName("target")
-    if not name then SetStatus("|cffff4040Target a bot first.|r"); return end
+    if not name then SetStatus("|cffff4040" .. T("Target a bot first.") .. "|r"); return end
     if button == "RightButton" then
         lastAssign = nil
         GroupOrder("assign clear " .. ICON_WORDS[marker])
-        SetStatus("|cffffff00Cleared " .. ICON_WORDS[marker] .. ", asking the server...|r")
+        SetStatus("|cffffff00" .. string.format(T("Cleared %s, asking the server..."), IconLabel(ICON_WORDS[marker])) .. "|r")
     else
         local role = ROLE_CYCLE[roleChoice]
         GroupOrder("assign " .. strlower(name) .. " " .. ICON_WORDS[marker] .. (role ~= "auto" and (" " .. role) or ""))
         lastAssign = { name = name, marker = marker, role = role, at = GetTime and GetTime() or 0 }
-        SetStatus("|cffffff00Sent: " .. name .. " on " .. ICON_WORDS[marker] .. ", waiting for the server...|r")
-        Print("sent: " .. name .. " on " .. ICON_WORDS[marker] .. (role ~= "auto" and (" (" .. role .. ")") or "") .. ", waiting for the server to confirm.")
+        SetStatus("|cffffff00" .. string.format(T("Sent: %s on %s, waiting for the server..."), name, IconLabel(ICON_WORDS[marker])) .. "|r")
+        Print(string.format(T("sent: %s on %s%s, waiting for the server to confirm."), name, IconLabel(ICON_WORDS[marker]),
+            role ~= "auto" and (" (" .. T(role) .. ")") or ""))
         roleChoice = 1
     end
     RequestListSoon()
@@ -329,20 +555,20 @@ local function ParseAssignLine(msg)
                 if a.marker + 1 == lastAssign.marker and strlower(a.name) == strlower(lastAssign.name) then found = a end
             end
             if found then
-                SetStatus("|cff00ff00Confirmed: " .. found.name .. ": " .. found.role .. " on " .. ICON_WORDS[found.marker + 1] .. "|r")
-                Print("confirmed: " .. found.name .. ": " .. found.role .. " on " .. ICON_WORDS[found.marker + 1])
+                SetStatus("|cff00ff00" .. string.format(T("Confirmed: %s: %s on %s"), found.name, T(found.role), IconLabel(ICON_WORDS[found.marker + 1])) .. "|r")
+                Print(string.format(T("confirmed: %s: %s on %s"), found.name, T(found.role), IconLabel(ICON_WORDS[found.marker + 1])))
                 lastAssign = nil
             elseif (GetTime and GetTime() or 0) - lastAssign.at > 4 then
-                SetStatus("|cffff4040The server did not confirm " .. lastAssign.name .. " on " .. ICON_WORDS[lastAssign.marker] .. ".|r")
-                Print("the server did not confirm " .. lastAssign.name .. " on " .. ICON_WORDS[lastAssign.marker] .. " (is it your bot, in your group?).")
+                SetStatus("|cffff4040" .. string.format(T("The server did not confirm %s on %s."), lastAssign.name, IconLabel(ICON_WORDS[lastAssign.marker])) .. "|r")
+                Print(string.format(T("the server did not confirm %s on %s (is it your bot, in your group?)."), lastAssign.name, IconLabel(ICON_WORDS[lastAssign.marker])))
                 lastAssign = nil
             end
         end
         if printNextList then
             printNextList = false
-            if #assignments == 0 then Print("no assignments.") end
+            if #assignments == 0 then Print(T("no assignments.")) end
             for _, a in ipairs(assignments) do
-                Print(ICON_WORDS[a.marker + 1] .. ": " .. a.name .. " (" .. a.role .. ")")
+                Print(IconLabel(ICON_WORDS[a.marker + 1]) .. ": " .. a.name .. " (" .. T(a.role) .. ")")
             end
         end
     end
@@ -365,7 +591,9 @@ local function WhisperFilter(_, _, msg, author)
     -- /fb chat on: show the bot confirmations ("<Bot>: followed you") and distance replies in chat as well
     if ForeverBotsDB.showChat then return false end
     if ConfirmText(msg, author) then return true end
-    return Now() < distSilentUntil and type(msg) == "string" and strmatch(msg, "^Follow distance %d+ yards$") ~= nil
+    -- the silent re-send of the distance: the server answers "Follow distance N yards", on a Russian client "Дистанция следования: N ярд."
+    return Now() < distSilentUntil and type(msg) == "string" and
+        (strmatch(msg, "^Follow distance %d+ yards$") ~= nil or strmatch(msg, "^Дистанция следования: %d+ ярд%.$") ~= nil)
 end
 local function OwnListFilter(_, _, msg, author)
     if msg ~= "assign list" and not (Now() < distSilentUntil and type(msg) == "string" and strmatch(msg, "^distance %d+$")) then
@@ -386,7 +614,7 @@ local whisperFrame = CreateFrame("Frame")
 whisperFrame:RegisterEvent("CHAT_MSG_WHISPER")
 whisperFrame:SetScript("OnEvent", function(_, _, msg)
     if IsSecret(msg) then
-        if lastAssign then SetStatus("|cffff8000The server answered but the client hid the reply (restricted chat).|r") end
+        if lastAssign then SetStatus("|cffff8000" .. T("The server answered but the client hid the reply (restricted chat).") .. "|r") end
         return
     end
     if IsAssignMsg(msg) then ParseAssignLine(msg) end
@@ -400,7 +628,7 @@ local frame
 local function MakeButton(parent, text, width, onClick, height)
     local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     b:SetSize(width, height or 22)
-    b:SetText(text)
+    b:SetText(T(text))
     b:SetScript("OnClick", onClick)
     return b
 end
@@ -433,7 +661,7 @@ end
 local function MakeSecureOrderButton(parent, text, width, order, height)
     local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate,SecureActionButtonTemplate")
     b:SetSize(width, height or 22)
-    b:SetText(text)
+    b:SetText(T(text))
     b:RegisterForClicks("AnyUp", "AnyDown")
     b.orderText = order
     secureOrders[#secureOrders + 1] = b
@@ -465,8 +693,8 @@ local KEY_ORDERS = {
     { "AttackMouseover", "attack", "Attack (mouseover)", "/target [@mouseover,harm,nodead]\n" },
 }
 BINDING_HEADER_FOREVERBOTS = "WoW Forever Bots"
-BINDING_NAME_FOREVERBOTS_TOGGLE_WINDOW = "Show / hide the bot window"
-BINDING_NAME_FOREVERBOTS_TOGGLE_STANCE = "Toggle stance (Passive / Aggressive)"
+BINDING_NAME_FOREVERBOTS_TOGGLE_WINDOW = T("Show / hide the bot window")
+BINDING_NAME_FOREVERBOTS_TOGGLE_STANCE = T("Toggle stance (Passive / Aggressive)")
 for _, k in ipairs(KEY_ORDERS) do
     local name = "ForeverBotsKey" .. k[1]
     local b = CreateFrame("Button", name, UIParent, "SecureActionButtonTemplate")
@@ -474,7 +702,7 @@ for _, k in ipairs(KEY_ORDERS) do
     b.orderText = k[2]
     b.macroPre = k[4]   -- optional macro lines before the order (Attack mouseover targets the unit under the cursor first)
     secureOrders[#secureOrders + 1] = b
-    _G["BINDING_NAME_CLICK " .. name .. ":LeftButton"] = k[3]
+    _G["BINDING_NAME_CLICK " .. name .. ":LeftButton"] = T(k[3])
 end
 RefreshOrderMacros()
 
@@ -527,7 +755,7 @@ local function SetGearChoice(g)
     for key, chip in pairs(gearChips or {}) do
         if key == g then chip:Disable() else chip:Enable() end
     end
-    if gearLabel then gearLabel:SetText("Now: |cffffd100" .. (GEAR_NAME[g] or g) .. "|r") end
+    if gearLabel then gearLabel:SetText(T("Now:") .. " |cffffd100" .. T(GEAR_NAME[g] or g) .. "|r") end
     SendGear()
 end
 
@@ -547,14 +775,14 @@ local addToggleBtn
 local function ShowAddPanel(show)
     ForeverBotsDB.addOpen = show and true or false
     if show then PlaceAddPanel(); addPanel:Show() else addPanel:Hide() end
-    if addToggleBtn then addToggleBtn:SetText(show and "Add bots  <" or "Add bots  >") end
+    if addToggleBtn then addToggleBtn:SetText(T(show and "Add bots  <" or "Add bots  >")) end
 end
 
 local function Tip(b, title, body)
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(title)
-        if body then GameTooltip:AddLine(body, 1, 1, 1, true) end
+        GameTooltip:SetText(T(title))
+        if body then GameTooltip:AddLine(T(body), 1, 1, 1, true) end
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -573,11 +801,11 @@ end
 
 local function RaidReady()
     if InCombatLockdown and InCombatLockdown() then
-        Print("raid ready: not in combat.")
+        Print(T("raid ready: not in combat."))
         return
     end
     if not (C_Timer and C_Timer.After) then
-        Print("raid ready: this client has no timers; use /fb call all.")
+        Print(T("raid ready: this client has no timers; use /fb call all."))
         return
     end
     raidReadyRun = raidReadyRun + 1
@@ -591,7 +819,7 @@ local function RaidReady()
 
     local function ReadyCheck()
         local ok = pcall(function() DoReadyCheck() end)
-        Print(ok and "raid ready: ready check sent." or "raid ready: done (only the leader can start a ready check).")
+        Print(T(ok and "raid ready: ready check sent." or "raid ready: done (only the leader can start a ready check)."))
     end
     local function Orders(n)
         GroupOrder("resume")
@@ -604,12 +832,12 @@ local function RaidReady()
                 GroupOrder("set main tank")
             end
         end)
-        Print("raid ready: " .. n .. " in the group, formation set. Ready check in 20 seconds.")
+        Print(string.format(T("raid ready: %d in the group, formation set. Ready check in 20 seconds."), n))
         After(20, ReadyCheck)
     end
     local function Finish(n)
         if n <= 1 then
-            Print("raid ready: no bots joined. Save a group with /fb save all first.")
+            Print(T("raid ready: no bots joined. Save a group with /fb save all first."))
             return
         end
         if n > 5 and not IsRaidNow() then
@@ -621,7 +849,7 @@ local function RaidReady()
         end
     end
 
-    Print("raid ready: calling your saved bots...")
+    Print(T("raid ready: calling your saved bots..."))
     ServerCommand(".bot summon saved")
     local lastN, stable, waited = -1, 0, 0
     local function Poll()
@@ -705,7 +933,7 @@ local function BuildFrame()
             local c = on and 1 or 0.55
             tex:SetVertexColor(c, c, c)
             if on then ring:SetVertexColor(0.2, 1, 0.2) else ring:SetVertexColor(0.9, 0.2, 0.2) end
-            cap:SetText(caption .. (on and " |cff00ff00on|r" or " |cffff4040off|r"))
+            cap:SetText(T(caption) .. (on and (" |cff00ff00" .. T("on") .. "|r") or (" |cffff4040" .. T("off") .. "|r")))
         end
         Paint()
         b:SetScript("OnClick", function()
@@ -717,9 +945,9 @@ local function BuildFrame()
         b:SetScript("OnEnter", function(self)
             local on = State()
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(title .. ": " .. (on and "|cff00ff00ON|r" or "|cffff4040OFF|r"))
-            GameTooltip:AddLine(on and onText or offText, 1, 1, 1, true)
-            GameTooltip:AddLine("Click to switch.", 0.7, 0.7, 0.7)
+            GameTooltip:SetText(T(title) .. ": " .. (on and ("|cff00ff00" .. T("ON") .. "|r") or ("|cffff4040" .. T("OFF") .. "|r")))
+            GameTooltip:AddLine(T(on and onText or offText), 1, 1, 1, true)
+            GameTooltip:AddLine(T("Click to switch."), 0.7, 0.7, 0.7)
             GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -731,7 +959,7 @@ local function BuildFrame()
         function(on)
             local asker = ListAsker()
             if asker then SendChatMessage("aoe_all " .. (on and "on" or "off"), "WHISPER", nil, asker)
-            else Print("add a bot first: the area-spell setting goes to your group.") end
+            else Print(T("add a bot first: the area-spell setting goes to your group.")) end
         end)
     Switch("cc", true, "Interface\\Icons\\Spell_Nature_Polymorph", "CC", "Crowd control",
         "The bots crowd-control the mobs you mark (give a bot and a mob the same icon, see Assign a bot to an icon).",
@@ -747,11 +975,11 @@ local function BuildFrame()
     local function Header(text, hint)
         local fs = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         fs:SetPoint("TOPLEFT", 16, y)
-        fs:SetText(text)
+        fs:SetText(T(text))
         if hint then
             local h = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             h:SetPoint("TOPLEFT", 16, y - 15)
-            h:SetText(hint)
+            h:SetText(T(hint))
             y = y - 15
         end
         y = y - 19
@@ -834,7 +1062,7 @@ local function BuildFrame()
     -- Distance row: how far the bots follow you (and the formation spacing), stepped 1 yard per click.
     local distLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     distLabel:SetPoint("TOPLEFT", 16, y - 4)
-    distLabel:SetText("Follow distance")
+    distLabel:SetText(T("Follow distance"))
     local distMinus = MakeButton(frame, "-", 26, function() StepDistance(-1) end)
     distMinus:SetPoint("TOPLEFT", 126, y)
     distText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -856,9 +1084,9 @@ local function BuildFrame()
         -- Tank markers: the tank bot you target takes the mob carrying the chosen raid marker (the main tank's pull is
         -- marked skull and the off tanks' mobs the next markers on their own; this overrides that). The marker button
         -- cycles skull, cross, star, circle, diamond, triangle, moon, square.
-        { "Marker: " .. TANK_MARKERS[tankMarker], 96, "Marker", "Click to cycle the marker (skull, cross, star, circle, diamond, triangle, moon, square) the next button hands out.", function(self)
+        { T("Marker:") .. " " .. IconLabel(TANK_MARKERS[tankMarker]), 96, "Marker", "Click to cycle the marker (skull, cross, star, circle, diamond, triangle, moon, square) the next button hands out.", function(self)
             tankMarker = tankMarker % #TANK_MARKERS + 1
-            self:SetText("Marker: " .. TANK_MARKERS[tankMarker])
+            self:SetText(T("Marker:") .. " " .. IconLabel(TANK_MARKERS[tankMarker]))
         end },
         { "Give to tank", 96, "Give marker to tank", "The tank bot you target holds whichever mob carries this marker (mark the mob yourself with the raid icons).", function() GroupOrder("tank target " .. TANK_MARKERS[tankMarker]) end },
     })
@@ -881,25 +1109,25 @@ local function BuildFrame()
         ib:SetScript("OnClick", function(_, button) AssignTarget(i, button) end)
         ib:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(ICON_WORDS[i])
-            GameTooltip:AddLine("Click: assign the targeted bot", 1, 1, 1)
-            GameTooltip:AddLine("Right-click: clear this icon", 1, 1, 1)
+            GameTooltip:SetText(IconLabel(ICON_WORDS[i]))
+            GameTooltip:AddLine(T("Click: assign the targeted bot"), 1, 1, 1)
+            GameTooltip:AddLine(T("Right-click: clear this icon"), 1, 1, 1)
             GameTooltip:Show()
         end)
         ib:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
     y = y - 34
     local roleBtn
-    roleBtn = MakeButton(frame, "Role: auto", 98, function()
+    roleBtn = MakeButton(frame, RoleText("auto"), 98, function()
         roleChoice = roleChoice % #ROLE_CYCLE + 1
-        roleBtn:SetText("Role: " .. ROLE_CYCLE[roleChoice])
+        roleBtn:SetText(RoleText(ROLE_CYCLE[roleChoice]))
     end)
     roleBtn:SetPoint("TOPLEFT", 16, y)
     Tip(roleBtn, "Role", "auto: a tank bot tanks the mob with that icon, casters crowd-control it until a skull goes on, the rest kill it first. Click to force tank, cc or kill for the next assignment.")
     local clearAll = MakeButton(frame, "Clear all", 98, function()
         GroupOrder("assign clear")
         lastAssign = nil
-        SetStatus("|cffffff00Cleared all, asking the server...|r")
+        SetStatus("|cffffff00" .. T("Cleared all, asking the server...") .. "|r")
         RequestListSoon()
     end)
     clearAll:SetPoint("TOPLEFT", 117, y)
@@ -942,7 +1170,7 @@ local function BuildFrame()
 
     ---------------------------------------------------------------------------------------------- add-bots drop-down
     addPanel = CreateFrame("Frame", nil, frame, BackdropTemplateMixin and "BackdropTemplate" or nil)
-    addPanel:SetSize(262, 10)
+    addPanel:SetSize(RU_CLIENT and 292 or 262, 10)
     addPanel:SetFrameStrata("DIALOG")
     addPanel:EnableMouse(true)
     if addPanel.SetBackdrop then
@@ -955,7 +1183,7 @@ local function BuildFrame()
     end
     local gTitle = addPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     gTitle:SetPoint("TOPLEFT", 14, -14)
-    gTitle:SetText("Select gear")
+    gTitle:SetText(T("Select gear"))
     gearChips = {}
     for i, g in ipairs(GEARS) do
         local chip = MakeButton(addPanel, g[2], 52, function() SetGearChoice(g[1]) end, 20)
@@ -967,15 +1195,15 @@ local function BuildFrame()
     gearLabel:SetPoint("TOPLEFT", 14, -80)
     local aTitle = addPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     aTitle:SetPoint("TOPLEFT", 14, -102)
-    aTitle:SetText("Add a bot")
+    aTitle:SetText(T("Add a bot"))
     local faction = UnitFactionGroup("player")
     local ay = -120
     for _, class in ipairs(CLASSES) do
         if not class.faction or class.faction == faction then
             local name = addPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
             name:SetPoint("TOPLEFT", 14, ay - 4)
-            name:SetText(ClassColor(class.token) .. class.label .. "|r")
-            local bx = 78
+            name:SetText(ClassColor(class.token) .. T(class.label) .. "|r")
+            local bx = RU_CLIENT and 108 or 78
             for _, role in ipairs(class.roles) do
                 local b = MakeButton(addPanel, ROLE_LABEL[role], 54, function() AddBotWithGear(class.key, role) end)
                 b:SetPoint("TOPLEFT", bx, ay)
@@ -986,7 +1214,7 @@ local function BuildFrame()
     end
     local aHint = addPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     aHint:SetPoint("TOPLEFT", 14, ay - 4)
-    aHint:SetText("A new bot joins you at your level.")
+    aHint:SetText(T("A new bot joins you at your level."))
     addPanel:SetHeight(-ay + 28)
     addPanel:Hide()
     SetGearChoice(GEAR_NAME[ForeverBotsDB.gear or ""] and ForeverBotsDB.gear or "match")
@@ -1062,7 +1290,7 @@ function ForeverBots_ToggleStance()
     ForeverBotsDB.stance = StanceIsAggressive() and "passive" or "aggressive"
     GroupOrder(ForeverBotsDB.stance)
     RefreshStance()
-    Print("stance: " .. StanceLabel())
+    Print(T("stance:") .. " " .. StanceLabel())
 end
 
 ------------------------------------------------------------------------------------------------------------- bot panel
@@ -1102,7 +1330,7 @@ local function InviteByName(name)
         local okC, res = pcall(C_PartyInfo.CanInvite)
         if okC then can = res end
     end
-    if can == false then Print("cannot invite " .. name .. " (the game says you may not invite right now)") end
+    if can == false then Print(string.format(T("cannot invite %s (the game says you may not invite right now)"), name)) end
     local sent, how = false, nil
     if C_PartyInfo and C_PartyInfo.InviteUnit then
         local ok, err = pcall(C_PartyInfo.InviteUnit, name)
@@ -1116,7 +1344,7 @@ local function InviteByName(name)
         local ok, err = pcall(SlashCmdList.INVITE, name)
         if ok then sent, how = true, "/invite" else Debug("invite: /invite failed: " .. tostring(err)) end
     end
-    if sent then Print("invite sent to " .. name .. " (" .. how .. ")") else Print("could not send the invite; type /invite " .. name) end
+    if sent then Print(string.format(T("invite sent to %s (%s)"), name, how)) else Print(string.format(T("could not send the invite; type /invite %s"), name)) end
 end
 
 local function BotWhisper(text)
@@ -1128,7 +1356,7 @@ end
 
 local function BotStepDistance(delta)
     botDist = math.max(DIST_MIN, math.min(DIST_MAX, math.floor((botDist or ForeverBotsDB.distance or DIST_START) + delta)))
-    if botDistFS then botDistFS:SetText(botDist .. " yd") end
+    if botDistFS then botDistFS:SetText(string.format(T("%d yd"), botDist)) end
     botDistDirtyAt = Now()
 end
 
@@ -1149,9 +1377,9 @@ local function UpdateBotPanel()
     if name ~= botName then
         botName, botClassToken = name, token
         botRoleChoice = 1
-        botRoleBtn:SetText("Role: auto")
+        botRoleBtn:SetText(RoleText("auto"))
         botDist = ForeverBotsDB.distance or DIST_START
-        botDistFS:SetText(botDist .. " yd")
+        botDistFS:SetText(string.format(T("%d yd"), botDist))
         botDistDirtyAt, botSentAt = nil, nil
         SetBotStatus("")
     end
@@ -1215,14 +1443,14 @@ local function BuildBotPanel()
                 local role = ROLE_CYCLE[botRoleChoice]
                 BotWhisper("assign " .. ICON_WORDS[i] .. (role ~= "auto" and (" " .. role) or ""))
                 botRoleChoice = 1
-                botRoleBtn:SetText("Role: auto")
+                botRoleBtn:SetText(RoleText("auto"))
             end
         end)
         ib:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(ICON_WORDS[i])
-            GameTooltip:AddLine("Click: this bot takes this icon", 1, 1, 1)
-            GameTooltip:AddLine("Right-click: clear it", 1, 1, 1)
+            GameTooltip:SetText(IconLabel(ICON_WORDS[i]))
+            GameTooltip:AddLine(T("Click: this bot takes this icon"), 1, 1, 1)
+            GameTooltip:AddLine(T("Right-click: clear it"), 1, 1, 1)
             GameTooltip:Show()
         end)
         ib:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1243,9 +1471,9 @@ local function BuildBotPanel()
     botDistFS:SetWidth(44)
     botDistFS:SetJustifyH("CENTER")
     B("+", 24, 166, -84, function() BotStepDistance(1) end)
-    botRoleBtn = B("Role: auto", 84, 12, -110, function()
+    botRoleBtn = B(RoleText("auto"), 84, 12, -110, function()
         botRoleChoice = botRoleChoice % #ROLE_CYCLE + 1
-        botRoleBtn:SetText("Role: " .. ROLE_CYCLE[botRoleChoice])
+        botRoleBtn:SetText(RoleText(ROLE_CYCLE[botRoleChoice]))
     end)
     B("Dismiss", 72, 102, -110, function() if botName then ServerCommand(".bot dismiss " .. botName) end end)
     local botStanceAggressive = false
@@ -1253,7 +1481,7 @@ local function BuildBotPanel()
     botStanceBtn = B("Passive", 56, 177, -110, function()
         botStanceAggressive = not botStanceAggressive
         BotWhisper(botStanceAggressive and "aggressive" or "passive")
-        botStanceBtn:SetText(botStanceAggressive and "Aggress." or "Passive")
+        botStanceBtn:SetText(T(botStanceAggressive and "Aggress." or "Passive"))
     end)
     botStatusFS = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     botStatusFS:SetPoint("TOPLEFT", 14, -136)
@@ -1272,7 +1500,7 @@ local function BuildBotPanel()
         end
         if botSentAt and now - botSentAt > 4 then
             botSentAt = nil
-            SetBotStatus("|cffff4040No answer: is " .. (botName or "it") .. " your bot?|r")
+            SetBotStatus("|cffff4040" .. string.format(T("No answer: is %s your bot?"), botName or T("it")) .. "|r")
         end
     end)
     p:Hide()
@@ -1315,7 +1543,7 @@ end)
 -- Blizzard UI", reported 2026-10-15). Anything that is not a click whispers with SendChatMessage / an addon whisper instead.
 function OpenWhisperBox(name, text)
     if not (ChatEdit_ChooseBoxForSend and ChatEdit_ActivateChat and ChatEdit_UpdateHeader) then
-        Print("type /w " .. name .. " <message> to whisper")
+        Print(string.format(T("type /w %s <message> to whisper"), name))
         return
     end
     local eb = ChatEdit_ChooseBoxForSend()
@@ -1355,7 +1583,7 @@ local function AddPopupEntry()
             if who == "" then return end
             local grouped = (UnitInParty and UnitInParty(unit)) or (UnitInRaid and UnitInRaid(unit))
             root:CreateDivider()
-            root:CreateButton("Whisper (Forever Bots)", function() OpenWhisperBox(who) end)
+            root:CreateButton(T("Whisper (Forever Bots)"), function() OpenWhisperBox(who) end)
             if grouped then
                 root:CreateButton("WoW Forever Bots", function()
                     local token = select(2, UnitClass(unit))
@@ -1380,7 +1608,7 @@ local function AddPopupEntry()
                     end
                 end
                 if not replaced then
-                    root:CreateButton("Invite (Forever Bots)", function() InviteByName(who) end)
+                    root:CreateButton(T("Invite (Forever Bots)"), function() InviteByName(who) end)
                 end
             end
         end)
@@ -1429,7 +1657,7 @@ do
         local name, text = strmatch(msg, "^%s*(%S+)%s+(.-)%s*$")
         if not name then name = strmatch(msg, "^%s*(%S+)%s*$"); text = nil end
         if not name then
-            Print("/w <name> <message> whispers a player")
+            Print(T("/w <name> <message> whispers a player"))
             return
         end
         name = strtrim((strsplit("-", name)))   -- "Name-Realm" -> "Name": a single realm
@@ -1440,18 +1668,18 @@ do
             -- as usual); it needs no second step.
             if text and BgWhisper(name, text) then return end
             -- no chat box from a slash handler: the portrait menu's "Whisper (Forever Bots)" opens it from a click
-            Print("battleground: the whisper to " .. name .. " could not be sent" .. (text and "" or " (type /w " .. name .. " <message>)")
-                .. "; right-click " .. name .. " and choose Whisper (Forever Bots)")
+            Print(string.format(T("battleground: the whisper to %s could not be sent%s; right-click %s and choose Whisper (Forever Bots)"), name,
+                text and "" or string.format(T(" (type /w %s <message>)"), name), name))
             return
         end
         if not text then
-            Print("type /w " .. name .. " <message> to whisper")
+            Print(string.format(T("type /w %s <message> to whisper"), name))
             return
         end
         -- Sent straight from the slash handler (no timer, no hook on SendChatMessage): the client's own /w never works in 70205.
         local ok, err = pcall(SendChatMessage, text, "WHISPER", nil, name)
         if not ok then
-            Print("whisper to " .. name .. " failed: " .. tostring(err))
+            Print(string.format(T("whisper to %s failed: %s"), name, tostring(err)))
             return
         end
     end
@@ -1499,7 +1727,7 @@ SlashCmdList.FOREVERBOTS = function(msg)
         if class == "on" then ForeverBotsDB.showChat = true
         elseif class == "off" then ForeverBotsDB.showChat = false
         else ForeverBotsDB.showChat = not ForeverBotsDB.showChat end
-        Print("bot confirmations in chat: " .. (ForeverBotsDB.showChat and "shown" or "hidden (shown in the Bots panel status line)") .. "  (/fb chat on|off)")
+        Print(string.format(T("bot confirmations in chat: %s  (/fb chat on|off)"), T(ForeverBotsDB.showChat and "shown" or "hidden (shown in the Bots panel status line)")))
         return
     end
     if verb == "debug" then
@@ -1601,8 +1829,8 @@ SlashCmdList.FOREVERBOTS = function(msg)
         if class == "on" then ForeverBotsDB.menuEntries = true
         elseif class == "off" then ForeverBotsDB.menuEntries = false
         else ForeverBotsDB.menuEntries = (ForeverBotsDB.menuEntries == false) end
-        Print("Whisper/Invite entries in the portrait right-click menu: " .. (ForeverBotsDB.menuEntries == false and "off" or "on")
-            .. " (takes effect after /reload)  (/fb menu on|off)")
+        Print(string.format(T("Whisper/Invite entries in the portrait right-click menu: %s (takes effect after /reload)  (/fb menu on|off)"),
+            T(ForeverBotsDB.menuEntries == false and "off" or "on")))
         return
     end
     if verb == "bgw" then
@@ -1622,7 +1850,7 @@ SlashCmdList.FOREVERBOTS = function(msg)
             GroupOrder("assign " .. class .. " " .. role .. ((extra and extra ~= "") and (" " .. extra) or ""))
             RequestListSoon()
         else
-            Print("/fb assign <name|target> <star|circle|diamond|triangle|moon|square|cross|skull> [tank|cc|kill]; /fb assign clear [marker|name]; /fb assign list")
+            Print(T("/fb assign <name|target> <star|circle|diamond|triangle|moon|square|cross|skull> [tank|cc|kill]; /fb assign clear [marker|name]; /fb assign list"))
         end
         return
     end
@@ -1633,14 +1861,14 @@ SlashCmdList.FOREVERBOTS = function(msg)
             if not botPanel then BuildBotPanel() end
             UpdateBotPanel()
         end
-        Print("bot panel is " .. (BotPanelEnabled() and "on" or "off") .. ". /fb bot on|off")
+        Print(string.format(T("bot panel is %s. /fb bot on|off"), T(BotPanelEnabled() and "on" or "off")))
         return
     end
     if verb == "tank" and class and class ~= "" then
         -- /fb tank <name> <marker>, /fb tank <name> clear, /fb tank clear
         if class == "clear" then GroupOrder("clear tanks")
         elseif role and role ~= "" then GroupOrder("tank " .. class .. " " .. role)
-        else Print("/fb tank <name> <skull|cross|star|circle|diamond|triangle|moon|square|clear>; /fb tank clear") end
+        else Print(T("/fb tank <name> <skull|cross|star|circle|diamond|triangle|moon|square|clear>; /fb tank clear")) end
         return
     end
     if verb == "add" and class and class ~= "" then
@@ -1666,13 +1894,13 @@ SlashCmdList.FOREVERBOTS = function(msg)
     elseif verb == "distance" then
         local n = tonumber(class)
         if n then SetDistance(n)
-        else Print("distance: " .. (ForeverBotsDB.distance and (ForeverBotsDB.distance .. " yards") or "auto") .. ". /fb distance <1-20> sets how far the bots follow you.") end
+        else Print(string.format(T("distance: %s. /fb distance <1-20> sets how far the bots follow you."), ForeverBotsDB.distance and string.format(T("%d yards"), ForeverBotsDB.distance) or T("auto"))) end
     elseif verb == "maintank" then
         GroupOrder((class and class ~= "") and ("set main tank " .. class) or "set main tank")
     elseif verb == "" or verb == nil then
         Toggle()
     else
-        Print("/fb opens the window; /fb add <class> [tank|healer|dps]; /fb raidready; /fb call|dismiss|save|unsave|regear [name|all]; /fb delete <name>; /fb list; /fb fallback; /fb pullback; /fb rally; /fb formation circle|arrow|line|none; /fb spacing tight|close|spread; /fb distance <1-20>; /fb maintank [name]; /fb bot on|off; /fb tank <name> <marker>|clear; /fb assign <name> <marker> [role]|clear|list; /fb debug on|off")
+        Print(T("/fb opens the window; /fb add <class> [tank|healer|dps]; /fb raidready; /fb call|dismiss|save|unsave|regear [name|all]; /fb delete <name>; /fb list; /fb fallback; /fb pullback; /fb rally; /fb formation circle|arrow|line|none; /fb spacing tight|close|spread; /fb distance <1-20>; /fb maintank [name]; /fb bot on|off; /fb tank <name> <marker>|clear; /fb assign <name> <marker> [role]|clear|list; /fb debug on|off"))
     end
 end
 
@@ -1698,7 +1926,7 @@ end
 local loader = CreateFrame("Frame")
 loader:RegisterEvent("PLAYER_LOGIN")
 loader:SetScript("OnEvent", function()
-    Print("type /fb for the bot window.")
+    Print(T("type /fb for the bot window."))
     if C_Timer and C_Timer.After then C_Timer.After(2, SayHello) else SayHello() end
     AddPopupEntry()
     lastGroupSize = GroupSize()

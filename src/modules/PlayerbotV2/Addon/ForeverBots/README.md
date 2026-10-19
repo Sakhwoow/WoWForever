@@ -6,6 +6,11 @@ does not depend on the addon-message protocol PlayerbotControl uses.
 Install: copy this folder to `<client>\_classic_beta_\Interface\AddOns\ForeverBots` (the folder name must stay
 `ForeverBots`). If the character screen's AddOns list marks it out of date, tick "Load out of date AddOns".
 
+Language: on a ruRU client the window, tooltips and messages are in Russian (same layout, shorter button captions); every other
+client shows English. The commands the add-on sends to the server stay English, so the Russian window works with any server.
+The server also understands Russian orders and chat commands (`.бот добавить воин танк`, `стой`, `за мной`) and answers a
+Russian client in Russian, see `BOT_COMMANDS.md` section 15.
+
 In game: `/fb` opens the window. The Raid ready button (or `/fb raidready`) calls your saved bots (`.bot summon saved`), makes the group a raid if needed, sets formation and spacing, and starts a ready check once the bots have buffed.
 
 On login the add-on greets the server once (a self-whisper under the `FBOTS` prefix). A player whose client does not greet within 30 seconds gets one chat line with the download link (`Playerbot.AddonHint.*` in the module config).
