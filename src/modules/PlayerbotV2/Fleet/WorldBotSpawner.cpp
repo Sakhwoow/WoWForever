@@ -23,7 +23,7 @@
 #include "../Bot/BotRegistry.h"
 #include "../Bot/IdleRule.h"
 #include "../Bot/IdleWatch.h"
-#include <format>
+#include "StringFormat.h"
 #include "MotionMaster.h"
 #include "../Bot/World/ZonePicker.h"
 #include "../Bot/World/SpreadSpot.h"
@@ -1302,7 +1302,7 @@ void WorldBotSpawner::DriveStuckLedger(uint32 now_ms)
             "[stuck_ledger] {} ({}) zone {} at ({:.1f},{:.1f},{:.1f}) strikes={} on_mesh={} {} ground_z={:.1f} rooted={} stunned={} held_state={} "
             "falling={} swimming={} move_gen={} run_speed={:.1f} target=({:.0f},{:.0f},{:.0f}) {} last_rule={}",
             p->GetName(), uint64(id), p->GetZoneId(), px, py, pz, w.strikes, on_mesh ? "yes" : "NO",
-            on_mesh ? "" : (wide ? std::format("(walkable ground {:.0f} y away)", std::hypot(wide_mesh.GetPositionX() - px, wide_mesh.GetPositionY() - py)) : std::string("(none within 40 y)")),
+            on_mesh ? "" : (wide ? Trinity::StringFormat("(walkable ground {:.0f} y away)", std::hypot(wide_mesh.GetPositionX() - px, wide_mesh.GetPositionY() - py)) : std::string("(none within 40 y)")),
             ground > INVALID_HEIGHT ? ground : -999.f, p->HasUnitMovementFlag(MOVEMENTFLAG_ROOT) ? 1 : 0, p->HasUnitState(UNIT_STATE_STUNNED) ? 1 : 0,
             p->HasUnitState(UNIT_STATE_ROOT | UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING | UNIT_STATE_CONTROLLED) ? 1 : 0,
             p->IsFalling() ? 1 : 0, p->IsInWater() ? 1 : 0, uint32(p->GetMotionMaster()->GetCurrentMovementGeneratorType()),
