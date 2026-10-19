@@ -4606,6 +4606,24 @@ Recap.Announce = 3
 
 Classic.GuildFinder = 0
 
+#    XpRateCommand.Enable
+#        Description: Players of the realm may choose a personal experience multiplier with ".xp rate <number>"
+#                     (kills, quests and exploration; ".xp rate default" goes back to x1). Ignored on Hardcore realms
+#                     (Classic.Hardcore = 1).
+#        Default:     1 - (Enabled)
+#                     0 - (Disabled)
+
+XpRateCommand.Enable = 1
+
+#    XpRateCommand.Min
+#    XpRateCommand.Max
+#        Description: Lowest and highest rate a player may choose with ".xp rate".
+#        Default:     1 - (Min)
+#                     5 - (Max)
+
+XpRateCommand.Min = 1
+XpRateCommand.Max = 5
+
 #    Classic.OpcodeGroupShift
 #        Description: Client 1.60.1.70291 numbers the message groups one higher than 70245 (and changed some packet and
 #                     update field layouts). -1 picks it from the realm's game build (realmlist.gamebuild >= 70291).
