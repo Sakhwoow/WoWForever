@@ -884,6 +884,7 @@ namespace WorldPackets
 
             ObjectGuid Player;
             DeclinedName DeclinedNames;
+            std::string RawHex;  // start of the packet when it could not be read, logged to learn the Classic layout
             bool Parsed = true; // false when the client sent a layout we cannot read (Classic 1.60 asks for a surname declension too)
         };
 

@@ -24,6 +24,7 @@
 #include "PacketOperators.h"
 #include "Player.h"
 #include "RealmList.h"
+#include "Util.h"
 #include "World.h"
 
 namespace UF
@@ -131,8 +132,9 @@ EnumCharactersResult::CharacterInfoBasic::CharacterInfoBasic(Field const* fields
     if (fields[17].GetUInt64())
         Flags |= CHARACTER_FLAG_LOCKED_BY_BILLING;
 
-    if (sWorld->getBoolConfig(CONFIG_DECLINED_NAMES_USED) && !fields[180].GetStringView().empty())
-        Flags |= CHARACTER_FLAG_DECLINED;
+    // Classic 1.60 (ruRU) asks for the declension of a Cyrillic name at every login until this flag is set, and its answer is a packet
+    // layout we do not store yet, so the flag is always reported: the declensions are optional and the dialog would only repeat
+    Flags |= CHARACTER_FLAG_DECLINED;
 
     if (atLoginFlags & AT_LOGIN_CUSTOMIZE)
         Flags2 = CHARACTER_FLAG_2_CUSTOMIZE;
@@ -936,6 +938,7 @@ void SetPlayerDeclinedNames::Read()
     catch (ByteBufferException const&)
     {
         Parsed = false;
+        RawHex = ByteArrayToHexStr(_worldPacket.contents(), std::min<size_t>(_worldPacket.size(), 600));
     }
 }
 
