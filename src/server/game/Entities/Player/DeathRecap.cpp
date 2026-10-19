@@ -254,7 +254,7 @@ namespace
     std::string ClassName(uint8 classId)
     {
         if (ChrClassesEntry const* entry = sChrClassesStore.LookupEntry(classId))
-            return entry->Name[DEFAULT_LOCALE];
+            return entry->Name[LOCALE_ruRU][0] ? entry->Name[LOCALE_ruRU] : entry->Name[DEFAULT_LOCALE];
         return "";
     }
 
@@ -283,7 +283,7 @@ namespace
     std::string AreaName(uint32 areaId)
     {
         if (AreaTableEntry const* area = sAreaTableStore.LookupEntry(areaId))
-            return area->AreaName[DEFAULT_LOCALE];
+            return area->AreaName[LOCALE_ruRU][0] ? area->AreaName[LOCALE_ruRU] : area->AreaName[DEFAULT_LOCALE];
         return "";
     }
 
@@ -755,16 +755,16 @@ void DeathRecap::OnPlayerDeath(Player* player)
     std::string const surname = sCharacterCache->GetCharacterSurnameByGuid(player->GetGUID());
     if (!surname.empty())
         name += " " + surname;
-    std::string text = Trinity::StringFormat("|cffc9a0ff[Recap #{}]|r |cff{}{}|r|cffff4040 (level {} {}) ", recap->Id, ClassColor(player->GetClass()), name,
+    std::string text = Trinity::StringFormat("|cffc9a0ff[Recap #{}]|r |cff{}{}|r|cffff4040 (уровень {}, {}) ", recap->Id, ClassColor(player->GetClass()), name,
         player->GetLevel(), ClassName(player->GetClass()));
     if (!killer.empty() && killer != name)
-        text += "was slain by " + killer + (killerSpell.empty() ? "" : " (" + killerSpell + ")");
+        text += "убит: " + killer + (killerSpell.empty() ? "" : " (" + killerSpell + ")");
     else
-        text += "died";
+        text += "погиб";
     std::string const zone = AreaName(player->GetZoneId());
     if (!zone.empty())
-        text += " in " + zone;
-    text += Trinity::StringFormat(". Type .recap {} to watch.|r", recap->Id);
+        text += ", " + zone;
+    text += Trinity::StringFormat(". Смотреть: .recap {}|r", recap->Id);
     Announce(player, text);
 }
 
@@ -792,7 +792,7 @@ namespace
                 if (Creature* actor = viewer->GetMap()->GetCreature(actorGuid))
                     actor->DespawnOrUnsummon();
             SendBack(viewer, false);
-            return "The recap couldn't be started.";
+            return "Не удалось начать просмотр.";
         }
 
         if (remote)
@@ -812,7 +812,7 @@ namespace
             Viewings[viewer->GetGUID()] = std::move(v);
         }
 
-        ChatHandler(viewer->GetSession()).SendSysMessage(Trinity::StringFormat("Watching recap #{} ({}). Type .recap stop to stop.", recap->Id, recap->VictimName));
+        ChatHandler(viewer->GetSession()).SendSysMessage(Trinity::StringFormat("Просмотр записи #{} ({}). Остановить: .recap stop", recap->Id, recap->VictimName));
         return "";
     }
 }
@@ -820,7 +820,7 @@ namespace
 std::string DeathRecap::Watch(Player* viewer, uint32 recapId)
 {
     if (!Cfg.Enabled)
-        return "The death recap is disabled on this realm.";
+        return "Разбор смертей на этом мире отключён.";
 
     std::shared_ptr<Recap const> recap;
     {
@@ -829,16 +829,16 @@ std::string DeathRecap::Watch(Player* viewer, uint32 recapId)
         if (itr != Recaps.end())
             recap = itr->second;
         if (Pending.contains(viewer->GetGUID()))
-            return "You are already on your way to a recap.";
+            return "Вы уже направляетесь к записи.";
     }
     if (!recap)
-        return Trinity::StringFormat("Recap #{} doesn't exist (anymore).", recapId);
+        return Trinity::StringFormat("Записи #{} нет (или она уже удалена).", recapId);
     if (viewer->IsInCombat())
-        return "You can't watch a recap while in combat.";
+        return "Нельзя смотреть запись в бою.";
     if (viewer->IsInFlight())
-        return "You can't watch a recap while flying.";
+        return "Нельзя смотреть запись в полёте.";
     if (viewer->IsBeingTeleported())
-        return "You can't watch a recap while teleporting.";
+        return "Нельзя смотреть запись во время телепортации.";
 
     // a new recap right after another one: stay where we are (the return point is kept)
     bool const wasAway = viewer->m_deathRecapReturn.has_value();
@@ -859,7 +859,7 @@ std::string DeathRecap::Watch(Player* viewer, uint32 recapId)
             EndViewing(viewer, old);
     }
     if (viewer->GetViewpoint())
-        return "You are already looking through something else.";
+        return "Вы уже смотрите чужими глазами.";
 
     if (viewer->GetMapId() == recap->MapId && viewer->GetInstanceId() == recap->InstanceId)
         return StartViewing(viewer, recap, wasAway);
@@ -869,17 +869,17 @@ std::string DeathRecap::Watch(Player* viewer, uint32 recapId)
     if (!recapMap || recapMap->Instanceable())
     {
         SendBack(viewer, false);
-        return "That death happened inside an instance: only players in that instance can watch it.";
+        return "Эта смерть произошла в подземелье: смотреть могут только игроки из него.";
     }
     if (viewer->GetMap()->Instanceable())
-        return "Leave the instance or battleground to watch deaths elsewhere.";
+        return "Покиньте подземелье или поле боя, чтобы смотреть смерти в других местах.";
 
     UnitSample const* start = nullptr;
     for (UnitSample const& s : recap->Frames.front().Units)
         if (s.Guid == recap->Victim)
             start = &s;
     if (!start)
-        return "The recap couldn't be started.";
+        return "Не удалось начать просмотр.";
 
     if (!viewer->m_deathRecapReturn)
         viewer->m_deathRecapReturn = viewer->GetWorldLocation();
@@ -894,10 +894,10 @@ std::string DeathRecap::Watch(Player* viewer, uint32 recapId)
             Pending.erase(viewer->GetGUID());
         }
         SendBack(viewer, false);
-        return "You can't be taken there right now.";
+        return "Сейчас вас туда перенести нельзя.";
     }
 
-    ChatHandler(viewer->GetSession()).SendSysMessage(Trinity::StringFormat("Taking you to where {} died...", recap->VictimName));
+    ChatHandler(viewer->GetSession()).SendSysMessage(Trinity::StringFormat("Переношу вас туда, где погиб {}...", recap->VictimName));
     return "";
 }
 
@@ -958,7 +958,7 @@ void DeathRecap::UpdateViewer(Player* viewer)
 
     if (viewer->IsInCombat())
     {
-        Stop(viewer, "Recap stopped: you are in combat.");
+        Stop(viewer, "Просмотр остановлен: вы в бою.");
         return;
     }
 
@@ -992,7 +992,7 @@ void DeathRecap::UpdateViewer(Player* viewer)
         PlayEvent(viewer, *v, events[v->NextEvent++]);
 
     if (replayTime >= v->Data->DeathTime + END_DELAY)
-        Stop(viewer, "Recap finished.");
+        Stop(viewer, "Просмотр окончен.");
 }
 
 void DeathRecap::OnRemoveFromWorld(Player* player)

@@ -610,7 +610,7 @@ public:
         Optional<uint32> id = Trinity::StringTo<uint32>(arg.starts_with('#') ? arg.substr(1) : arg);
         if (!id)
         {
-            chat.SendSysMessage("Usage: .recap <number> to watch a death, .recap stop to stop watching.");
+            chat.SendSysMessage("Использование: .recap <номер> — смотреть смерть, .recap stop — остановить просмотр.");
             return true;
         }
 

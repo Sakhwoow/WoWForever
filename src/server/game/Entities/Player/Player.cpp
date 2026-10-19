@@ -4531,7 +4531,7 @@ bool Player::RefuseHardcoreResurrect()
     if (IsAlive() || m_hardcoreReviveAllowed || !sConfigMgr->GetBoolDefault("Classic.Hardcore", false))
         return false;
 
-    ChatHandler(GetSession()).SendSysMessage("Hardcore: this character has fallen. Death is permanent on this realm.");
+    ChatHandler(GetSession()).SendSysMessage("Хардкор: этот персонаж пал. На этом мире смерть окончательна.");
     return true;
 }
 
