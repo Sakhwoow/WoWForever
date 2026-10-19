@@ -2093,6 +2093,7 @@ void WorldSession::HandleSetPlayerDeclinedNames(WorldPackets::Character::SetPlay
     // the Classic client waits for the answer before finishing character creation; declensions are optional
     if (!packet.Parsed)
     {
+        TC_LOG_INFO("entities.player.character", "SetPlayerDeclinedNames of {} not read, packet start: {}", packet.Player.ToString(), packet.RawHex);
         SendSetPlayerDeclinedNamesResult(DECLINED_NAMES_RESULT_SUCCESS, packet.Player);
         return;
     }
