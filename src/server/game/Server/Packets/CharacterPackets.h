@@ -884,6 +884,7 @@ namespace WorldPackets
 
             ObjectGuid Player;
             DeclinedName DeclinedNames;
+            bool Parsed = true; // false when the client sent a layout we cannot read (Classic 1.60 asks for a surname declension too)
         };
 
         class SetPlayerDeclinedNamesResult final : public ServerPacket

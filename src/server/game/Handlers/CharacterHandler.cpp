@@ -2089,6 +2089,13 @@ void WorldSession::HandleCharRenameCallBack(std::shared_ptr<WorldPackets::Charac
 
 void WorldSession::HandleSetPlayerDeclinedNames(WorldPackets::Character::SetPlayerDeclinedNames& packet)
 {
+    // the Classic client waits for the answer before finishing character creation; declensions are optional
+    if (!packet.Parsed)
+    {
+        SendSetPlayerDeclinedNamesResult(DECLINED_NAMES_RESULT_SUCCESS, packet.Player);
+        return;
+    }
+
     // not accept declined names for unsupported languages
     std::string name;
     if (!sCharacterCache->GetCharacterNameByGuid(packet.Player, name))

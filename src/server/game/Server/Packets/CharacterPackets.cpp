@@ -925,11 +925,18 @@ void SetPlayerDeclinedNames::Read()
 {
     _worldPacket >> Player;
 
-    for (uint8 i = 0; i < MAX_DECLINED_NAME_CASES; ++i)
-        _worldPacket >> SizedString::BitsSize<7>(DeclinedNames.name[i]);
+    try
+    {
+        for (uint8 i = 0; i < MAX_DECLINED_NAME_CASES; ++i)
+            _worldPacket >> SizedString::BitsSize<7>(DeclinedNames.name[i]);
 
-    for (uint8 i = 0; i < MAX_DECLINED_NAME_CASES; ++i)
-        _worldPacket >> SizedString::Data(DeclinedNames.name[i]);
+        for (uint8 i = 0; i < MAX_DECLINED_NAME_CASES; ++i)
+            _worldPacket >> SizedString::Data(DeclinedNames.name[i]);
+    }
+    catch (ByteBufferException const&)
+    {
+        Parsed = false;
+    }
 }
 
 WorldPacket const * SetPlayerDeclinedNamesResult::Write()
