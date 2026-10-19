@@ -3073,7 +3073,10 @@ uint64 BotPopulationManager::SpawnNew(uint8 level, bool alliance, uint8 race_hin
         // through LoginExisting (distribution_level 0): counting them here
         // stopped a small ambient world short of its target (10 companions
         // + TotalTarget 20 -> cap 22 -> only 12 world bots ever spawned).
-        const uint32 spawn_cap = uint32(float(total_target) * 1.10f);
+        // Playerbot.Population.SpawnCapFactor (default 1.10): how far above TotalTarget the pool of characters may grow. A pool that
+        // does not match the level/faction buckets (e.g. only Horde, or too few level-60s) can only be completed by creating more.
+        float const cap_factor = std::max(1.0f, sConfigMgr->GetFloatDefault("Playerbot.Population.SpawnCapFactor", 1.10f, true));
+        const uint32 spawn_cap = uint32(float(total_target) * cap_factor);
         const uint32 marked    = pool_marked_count_;
         if (marked >= spawn_cap)
         {
