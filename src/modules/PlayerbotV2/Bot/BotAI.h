@@ -5,6 +5,7 @@
 
 #pragma once
 #include "ClassicBuffLedger.h"
+#include "Threading/AtomicSharedPtr.h"
 
 #include "IdleWatch.h"
 #include "WalkOrder.h"
@@ -3444,7 +3445,7 @@ public:
     std::shared_ptr<PublishedBgAdvice const> published_bg_advice() const
     { return published_bg_advice_.load(std::memory_order_acquire); }
 private:
-    std::atomic<std::shared_ptr<PublishedBgAdvice const>> published_bg_advice_;
+    AtomicSharedPtr<PublishedBgAdvice const> published_bg_advice_;
 public:
     bool prev_in_battleground() const { return prev_in_battleground_; }
     void set_prev_in_battleground(bool v) { prev_in_battleground_ = v; }
