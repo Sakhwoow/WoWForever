@@ -10,6 +10,7 @@
 #include "ClassicTalentBuilds.h"
 #include "ClassicSupplies.h"
 #include "Bot/ClassicUpkeep.h"
+#include "Bot/BotL10n.h"  // whisper(): the Russian text of a reply for a ruRU client
 #include "BotItemScorer.h"
 #include "Player.h"
 #include "Corpse.h"
@@ -3551,7 +3552,8 @@ Result API::whisper(std::string const& target_name, std::string const& text)
     if (!p_ || target_name.empty() || text.empty()) return Result::Other;
     Player* recipient = ObjectAccessor::FindConnectedPlayerByName(target_name);
     if (!recipient) return Result::InvalidTarget;
-    p_->Whisper(text, LANG_UNIVERSAL, recipient);
+    // A ruRU client gets the Russian text of the reply when BotL10nText.h knows it; any other reply goes out as it is.
+    p_->Whisper(Playerbot::V2::L10n::Localize(recipient, text), LANG_UNIVERSAL, recipient);
     return Result::Ok;
 }
 

@@ -18,6 +18,7 @@
 #include "../Fleet/OwnerRegistry.h"
 #include "../Fleet/PlayerCraftOrders.h"
 #include "BotAddressResolver.h"
+#include "BotL10n.h"       // Russian orders and replies (L10n::TranslateOrder / Tr)
 #include "../Diagnostics/BotInspector.h"
 #include "../Diagnostics/PerfCounters.h"
 #include "Util.h"  // Trinity::Tokenize for /diag multi-line output
@@ -856,7 +857,8 @@ void OrderMainTank(Player* sender, Player* bot, std::string const& name)
         {
             s_last_msg = now;
             if (sender->GetSession())
-                ChatHandler(sender->GetSession()).SendSysMessage("Main tank: needs a raid group (/raid to convert).");
+                ChatHandler(sender->GetSession()).SendSysMessage(V2::L10n::Tr(sender, "Main tank: needs a raid group (/raid to convert).",
+                    "Главный танк: нужна рейдовая группа (преобразуйте группу в рейд командой /raid)."));
         }
         return;
     }
@@ -1772,10 +1774,15 @@ static std::string FormatAddressKind(ResolvedAddress const& a)
 bool BotCommandParser::Dispatch(Player* sender, Player* bot, std::string const& msg, char const* via)
 {
     if (!sender || !bot) return false;
+    // A Russian order ("стой", "танки: тяни", "бросить задание X") runs as the English order it stands for (BotL10nText.h): the
+    // address prefix and the verb are translated, the rest of this function and the whole parser below see English. Any other
+    // text, every English order included, goes on unchanged.
+    std::optional<std::string> const english = V2::L10n::HasNonAscii(msg) ? V2::L10n::TranslateOrder(msg, /*group*/ false) : std::nullopt;
+    std::string const& text = english ? *english : msg;
     // Resolve squad-address prefix (all:/tank:/mage:/Areon:/...).
     // Single-recipient is the most common path — short-circuit so we
     // don't pay the snapshot lookups when the owner just `/w Areon come`.
-    ResolvedAddress addr = BotAddressResolver::Resolve(sender, bot, msg);
+    ResolvedAddress addr = BotAddressResolver::Resolve(sender, bot, text);
     if (addr.kind == ResolvedAddress::Kind::Single)
     {
         // No prefix — direct dispatch on the whispered bot. Authority
@@ -1788,8 +1795,9 @@ bool BotCommandParser::Dispatch(Player* sender, Player* bot, std::string const& 
             ~DirectGuard() { t_direct_whisper = prev; }
         } guard(via && std::strcmp(via, "whisper") == 0);
         if (t_direct_whisper)
-            TC_LOG_INFO("playerbot.v2", "[owner_order] whisper {} <- {}: \"{}\"", bot->GetName(), sender->GetName(), msg);
-        return DispatchSingle(sender, bot, msg, via);
+            TC_LOG_INFO("playerbot.v2", "[owner_order] whisper {} <- {}: \"{}\"{}", bot->GetName(), sender->GetName(), msg,
+                        english ? " (Russian, read as \"" + *english + "\")" : std::string());
+        return DispatchSingle(sender, bot, text, via);
     }
     // Prefix matched — apply to the resolved set. Reply once via the
     // whispered bot with a summary; per-bot acks would flood the chat.

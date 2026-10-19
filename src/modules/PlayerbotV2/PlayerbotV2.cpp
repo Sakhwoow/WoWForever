@@ -48,6 +48,7 @@
 #include "Bot/BotCommandParser.h"
 #include "Bot/BotChatReactor.h"
 #include "Bot/GroupOrderText.h"
+#include "Bot/BotL10n.h"
 #include "Bot/AddonHint.h"
 #include "Bot/BotTextMgr.h"
 #include "Chat.h"
@@ -3215,7 +3216,9 @@ void Module::RouteGroupOrder(Player* sender, Group* group, std::string order)
         bool const on = word == "on";
         bool const changed = Services::Owners().SetCcEnabled(account, on);
         TC_LOG_INFO("playerbot.v2", "[cc_switch] {} turns crowd control {} ({})", sender->GetName(), word, changed ? "changed" : "already");
-        ChatHandler(sender->GetSession()).PSendSysMessage("Crowd control for your bots: %s.", on ? "on" : "off");
+        bool const ru = Playerbot::V2::L10n::IsRu(sender);
+        ChatHandler(sender->GetSession()).PSendSysMessage(ru ? "Контроль (CC) ваших ботов: %s." : "Crowd control for your bots: %s.",
+                                                          ru ? (on ? "включён" : "выключен") : (on ? "on" : "off"));
         return;
     }
     uint32 tanks = 0;
@@ -3353,9 +3356,10 @@ void Module::RouteGroupOrder(Player* sender, Group* group, std::string order)
             ++owned_tanks;
             if (!m->IsAlive()) ++dead_tanks;
         }
+        bool const ru = Playerbot::V2::L10n::IsRu(sender);
         ChatHandler(sender->GetSession()).PSendSysMessage(owned_tanks && dead_tanks == owned_tanks ?
-            "Your tank bots are all dead; use attack instead." :
-            "No tank among your bots to pull; use attack instead.");
+            (ru ? "Все ваши боты-танки мертвы; используйте приказ «атака»." : "Your tank bots are all dead; use attack instead.") :
+            (ru ? "Среди ваших ботов нет танка, который мог бы тянуть; используйте приказ «атака»." : "No tank among your bots to pull; use attack instead."));
         TC_LOG_INFO("playerbot.v2", "[pull_back] {} '{}': no tank pulled (your tank bots in the group: {}, dead {}; flagged main tank skipped: {})",
                     sender->GetName(), order, owned_tanks, dead_tanks, main_tank_skipped.empty() ? "none" : main_tank_skipped);
     }
@@ -3422,7 +3426,8 @@ void Module::SendDueAddonHints()
         Player* p = ObjectAccessor::FindConnectedPlayer(ObjectGuid::Create<HighGuid::Player>(guid));
         if (!p || !p->IsInWorld() || !p->GetSession() || p->GetSession()->IsBot())
             continue;
-        ChatHandler(p->GetSession()).PSendSysMessage("WoW Forever Bots add-on (buttons for your bots, Raid ready): %s - unzip it into Interface\\AddOns and type /reload.",
+        ChatHandler(p->GetSession()).PSendSysMessage(Playerbot::V2::L10n::Tr(p, "WoW Forever Bots add-on (buttons for your bots, Raid ready): %s - unzip it into Interface\\AddOns and type /reload.",
+            "Аддон WoW Forever Bots (кнопки для ваших ботов, «Рейд готов»): %s — распакуйте его в Interface\\AddOns и введите /reload."),
             Services::Config().addon_hint_url().c_str());
         TC_LOG_INFO("playerbot.v2", "[addon_hint] {} has no ForeverBots add-on: link sent", p->GetName());
     }
@@ -3522,7 +3527,7 @@ void Module::OnPartyChat(Player* sender, Group* group, std::string const& msg)
             it.bot_id = pid;
             it.body = ChatIntent{WhisperIntent{
                 sender->GetName(),
-                fmt::format("{}: no order '{}' (unknown, or not yours to give)", primary->GetName(), body.substr(0, 40))}};
+                fmt::format("{}: no order '{}' (unknown, or not yours to give)", primary->GetName(), Playerbot::V2::L10n::TruncUtf8(body, 40))}};
             Services::Intents(pid).push(std::move(it));
         }
     }

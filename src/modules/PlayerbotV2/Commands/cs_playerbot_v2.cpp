@@ -60,6 +60,7 @@
 #include "Bot/BotRegistry.h"
 #include "Bot/BotPersonality.h"
 #include "Bot/BotTextMgr.h"
+#include "Bot/BotL10n.h"
 #include "Bot/BotRng.h"
 #include "Session/BotSessionMgr.h"
 #include "Threading/TickScheduler.h"
@@ -131,6 +132,13 @@ std::string ToLowerAscii(std::string s)
     return s;
 }
 
+// The English word behind a Russian class / role / race / gender / "all" argument of the `.bot` commands (BotL10nText.h), so that
+// `.bot add воин танк` reads like `.bot add warrior tank`. An English word comes back lower-cased, exactly as ToLowerAscii does.
+std::string ArgWord(std::string const& token)
+{
+    return Playerbot::V2::L10n::ArgWordToEnglish(token);
+}
+
 // Parse a race name OR a numeric race id. Returns 0 on unrecognized input.
 // Aliases match common short forms: 'elf' -> NightElf, 'be' -> BloodElf, etc.
 uint8 ParseRace(std::string const& token)
@@ -138,7 +146,7 @@ uint8 ParseRace(std::string const& token)
     if (token.empty()) return 0;
     if (std::isdigit(static_cast<unsigned char>(token.front())))
         return uint8(std::strtoul(token.c_str(), nullptr, 10));
-    std::string s = ToLowerAscii(token);
+    std::string s = ArgWord(token);
     if (s == "human")                         return RACE_HUMAN;
     if (s == "orc")                           return RACE_ORC;
     if (s == "dwarf")                         return RACE_DWARF;
@@ -182,7 +190,7 @@ uint8 ParseClass(std::string const& token)
     if (token.empty()) return 0;
     if (std::isdigit(static_cast<unsigned char>(token.front())))
         return uint8(std::strtoul(token.c_str(), nullptr, 10));
-    std::string s = ToLowerAscii(token);
+    std::string s = ArgWord(token);
     if (s == "warrior")                          return CLASS_WARRIOR;
     if (s == "paladin"   || s == "pala")         return CLASS_PALADIN;
     if (s == "hunter"    || s == "hunt")         return CLASS_HUNTER;
@@ -626,10 +634,40 @@ public:
             { "bgstress",      HandleBotBgStress,   rbac::RBAC_PERM_COMMAND_GM, Console::Yes },
             { "bgsoak",        HandleBotBgSoak,     rbac::RBAC_PERM_COMMAND_GM, Console::Yes },
         };
+        // The same commands under Russian names: `.бот добавить воин танк`, `.бот вызвать все`, `.бот распустить все`. The command
+        // parser compares names case-insensitively for ASCII only, so the names are written lower-case; the root also has its
+        // capitalised spelling. Same handlers, same permissions as the English table.
+        static ChatCommandTable botTableRu =
+        {
+            { "о",             HandleBotAbout,      rbac::RBAC_PERM_COMMAND_GM, Console::Yes },
+            { "справка",       HandleBotAbout,      rbac::RBAC_PERM_COMMAND_GM, Console::Yes },
+            { "добавить",      HandleBotAdd,        rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "добавь",        HandleBotAdd,        rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "вызвать",       HandleBotCall,       rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "вызови",        HandleBotCall,       rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "собрать",       HandleBotSummon,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "собери",        HandleBotSummon,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "распустить",    HandleBotDismiss,    rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "распусти",      HandleBotDismiss,    rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "отпустить",     HandleBotDismiss,    rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "экипировка",    HandleBotRegear,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "переодеть",     HandleBotRegear,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "переодень",     HandleBotRegear,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "сохранить",     HandleBotSave,       rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "сохрани",       HandleBotSave,       rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "забыть",        HandleBotUnsave,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "забудь",        HandleBotUnsave,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "убрать",        HandleBotUnsave,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "удалить",       HandleBotDelete,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "удали",         HandleBotDelete,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+            { "список",        HandleBotList,       rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No },
+        };
         static ChatCommandTable root =
         {
             { "playerbot", v2Table },
             { "bot",       botTable },
+            { "бот",       botTableRu },
+            { "Бот",       botTableRu },
             // `.w <name> <text>` / `.tell <name> <text>`: whisper as a chat command. The 70205 client has no working /w, and inside
             // battlegrounds the addon's whisper is blocked (Karrz 2026-10-08, WSG: SAY packets and dot commands go through,
             // whispers never leave the client). Every player.
@@ -649,7 +687,7 @@ public:
         std::string msg(text);
         if (name.empty() || msg.empty())
         {
-            handler->SendSysMessage("Usage: .w <name> <message>");
+            handler->SendSysMessage(Tr(handler, "Usage: .w <name> <message>", "Использование: .w <имя> <сообщение>"));
             handler->SetSentErrorMessage(true);
             return false;
         }
@@ -664,7 +702,7 @@ public:
 
     static Playerbot::Role ParseRoleWord(std::string const& token, bool& ok)
     {
-        std::string const s = ToLowerAscii(token);
+        std::string const s = ArgWord(token);
         ok = true;
         if (s == "tank")                                    return Playerbot::Role::Tank;
         if (s == "heal" || s == "healer")                   return Playerbot::Role::Healer;
@@ -709,6 +747,36 @@ public:
         return false;
     }
 
+    // The text for the caller's client: Russian on a ruRU client, the English text otherwise (BotL10n.h). A printf format here
+    // stays a printf format: both versions take the same arguments in the same order.
+    static char const* Tr(ChatHandler const* handler, char const* en, char const* ru)
+    {
+        return Playerbot::V2::L10n::Tr(handler, en, ru);
+    }
+
+    static char const* NotInitializedText(ChatHandler const* handler)
+    {
+        return Tr(handler, "PlayerbotV2 not initialized.", "Боты не инициализированы.");
+    }
+
+    // The class names of the Classic classes for a Russian client (the English ClassName below serves everyone else).
+    static char const* ClassNameRu(uint8 cls)
+    {
+        switch (cls)
+        {
+            case CLASS_WARRIOR: return "воин";
+            case CLASS_PALADIN: return "паладин";
+            case CLASS_HUNTER:  return "охотник";
+            case CLASS_ROGUE:   return "разбойник";
+            case CLASS_PRIEST:  return "жрец";
+            case CLASS_SHAMAN:  return "шаман";
+            case CLASS_MAGE:    return "маг";
+            case CLASS_WARLOCK: return "чернокнижник";
+            case CLASS_DRUID:   return "друид";
+            default:            return "?";
+        }
+    }
+
     // .bot addon: sent silently by the ForeverBots add-on a few seconds after login, so the server knows this client has it and
     // does not send the download hint (Playerbot.AddonHint.*). Says nothing.
     static bool HandleBotAddonHello(ChatHandler* handler)
@@ -722,24 +790,28 @@ public:
     // .bot about: the name of the bots, so it shows in the command list and `.bot` help
     static bool HandleBotAbout(ChatHandler* handler)
     {
-        handler->SendSysMessage("WoW Forever Bots by Karrz, based on agatho's PlayerbotV2 (GPL-2.0). .bot add <class> [tank|healer|dps], .bot call, .bot dismiss; all orders: BOT_COMMANDS.md");
+        handler->SendSysMessage(Tr(handler,
+            "WoW Forever Bots by Karrz, based on agatho's PlayerbotV2 (GPL-2.0). .bot add <class> [tank|healer|dps], .bot call, .bot dismiss; all orders: BOT_COMMANDS.md",
+            "WoW Forever Bots (автор Karrz, на основе PlayerbotV2 от agatho, GPL-2.0). .бот добавить <класс> [танк|лекарь|урон], .бот вызвать, .бот распустить; все приказы (и русские слова): BOT_COMMANDS.md"));
         return true;
     }
 
     // .bot add <class> [tank|healer|dps] [race] [male|female]
+    // Russian: .бот добавить <класс> [танк|лекарь|урон] [раса] [мужской|женский]. The words after the class come in any order and a
+    // two-word race ("ночной эльф") takes two of the four optional slots.
     static bool HandleBotAdd(ChatHandler* handler, std::string const& class_arg, Optional<std::string> arg2,
-                             Optional<std::string> arg3, Optional<std::string> arg4)
+                             Optional<std::string> arg3, Optional<std::string> arg4, Optional<std::string> arg5)
     {
         if (!Playerbot::Services::Initialized())
-        { handler->SendSysMessage("PlayerbotV2 not initialized."); return Refuse(handler); }
+        { handler->SendSysMessage(NotInitializedText(handler)); return Refuse(handler); }
         WorldSession* sess = handler->GetSession();
         Player* me = sess ? sess->GetPlayer() : nullptr;
         if (!me)
-        { handler->SendSysMessage("`.bot add` is in-game only."); return Refuse(handler); }
+        { handler->SendSysMessage(Tr(handler, "`.bot add` is in-game only.", "Команда `.bot add` работает только в игре.")); return Refuse(handler); }
 
         // Say so up front: otherwise a full raid creates a character that can never join and the owner sees nothing.
         if (Group const* ownerGroup = me->GetGroup(); ownerGroup && ownerGroup->isRaidGroup() && ownerGroup->IsFull())
-        { handler->SendSysMessage("Bot add failed: your raid is full."); return Refuse(handler); }
+        { handler->SendSysMessage(Tr(handler, "Bot add failed: your raid is full.", "Не удалось добавить бота: ваш рейд заполнен.")); return Refuse(handler); }
         // Open world: 5 companions out at most (invite world bots for more); inside an instance what the map holds
         // (Playerbot.Behavior.InstanceGroupCap).
         if (std::string full; Playerbot::V2::Fleet::CompanionSpawnFull(me, 0, full))
@@ -748,56 +820,71 @@ public:
             TC_LOG_INFO("playerbot.v2", "[InstanceCap] {} .bot add refused: map={} cap={} out={} group={}: {}", me->GetName(), me->GetMapId(),
                         Playerbot::V2::Fleet::InstanceGroupCapFor(me, &capMap), Playerbot::V2::Fleet::CompanionsOut(me),
                         me->GetGroup() ? me->GetGroup()->GetMembersCount() : 1u, full);
-            handler->PSendSysMessage("Bot add failed: %s.", full.c_str());
+            handler->PSendSysMessage(Tr(handler, "Bot add failed: %s.", "Не удалось добавить бота: %s."),
+                                     Playerbot::V2::L10n::Localize(handler, full).c_str());
             return Refuse(handler);
         }
 
         uint8 const cls = ParseClass(class_arg);
         if (!cls || !sChrClassesStore.LookupEntry(cls))
         {
-            handler->SendSysMessage("WoW Forever Bots. Usage: .bot add <class> [tank|healer|dps] [race] [male|female]  e.g. .bot add priest healer");
+            handler->SendSysMessage(Tr(handler,
+                "WoW Forever Bots. Usage: .bot add <class> [tank|healer|dps] [race] [male|female]  e.g. .bot add priest healer",
+                "WoW Forever Bots. Использование: .бот добавить <класс> [танк|лекарь|урон] [раса] [мужской|женский]  например: .бот добавить жрец лекарь"));
             return Refuse(handler);
         }
 
-        // The optional words can come in any order: a role, a race, a gender.
+        // The optional words can come in any order: a role, a race, a gender. A race of two words is joined first.
+        std::vector<std::string> words;
+        for (Optional<std::string> const* arg : { &arg2, &arg3, &arg4, &arg5 })
+            if (*arg)
+                words.push_back(Playerbot::V2::L10n::FoldRu(**arg));
+        for (size_t i = 0; i + 1 < words.size(); ++i)
+            if (std::string joined = Playerbot::V2::L10n::JoinRaceWords(words[i], words[i + 1]); !joined.empty())
+            {
+                words[i] = std::move(joined);
+                words.erase(words.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+            }
         Playerbot::Role role = Playerbot::Role::Unknown;
         uint8 race = 0;
         uint8 gender = uint8(urand(GENDER_MALE, GENDER_FEMALE));
-        for (Optional<std::string> const* arg : { &arg2, &arg3, &arg4 })
+        for (std::string const& typed : words)
         {
-            if (!*arg)
-                continue;
-            std::string const word = ToLowerAscii(**arg);
+            std::string const word = ArgWord(typed);
             bool is_role = false;
             Playerbot::Role const r = ParseRoleWord(word, is_role);
             if (is_role) { role = r; continue; }
             if (word == "male" || word == "m")     { gender = GENDER_MALE; continue; }
             if (word == "female" || word == "f")   { gender = GENDER_FEMALE; continue; }
             if (uint8 const parsed = ParseRace(word); parsed && IsClassicRace(parsed)) { race = parsed; continue; }
-            handler->PSendSysMessage("Don't know '%s': expected tank, healer, dps, a race, male or female.", word.c_str());
+            handler->PSendSysMessage(Tr(handler, "Don't know '%s': expected tank, healer, dps, a race, male or female.",
+                                        "Не понимаю '%s': ожидается танк, лекарь, урон, раса, мужской или женский."), typed.c_str());
             return Refuse(handler);
         }
 
         if (race && !Playerbot::V2::BotComposition::IsLegalRaceClass(race, cls))
-        { handler->PSendSysMessage("That race can't be a %s.", class_arg.c_str()); return Refuse(handler); }
+        { handler->PSendSysMessage(Tr(handler, "That race can't be a %s.", "Эта раса не может быть классом «%s»."), class_arg.c_str()); return Refuse(handler); }
         if (race && Player::TeamForRace(race) != me->GetTeam())
-        { handler->SendSysMessage("That race is from the other faction, so it couldn't join your group."); return Refuse(handler); }
+        { handler->SendSysMessage(Tr(handler, "That race is from the other faction, so it couldn't join your group.",
+                                     "Эта раса из другой фракции, поэтому не сможет вступить в вашу группу.")); return Refuse(handler); }
         if (!race)
             race = PickCompanionRace(me, cls);
         if (!race)
-        { handler->PSendSysMessage("No race of your faction can be a %s.", class_arg.c_str()); return Refuse(handler); }
+        { handler->PSendSysMessage(Tr(handler, "No race of your faction can be a %s.", "Ни одна раса вашей фракции не может быть классом «%s»."), class_arg.c_str()); return Refuse(handler); }
 
         auto const pick = Playerbot::V2::BotComposition::Roll(race, cls, gender, "");
         if (pick.race == 0 || pick.name.empty())
         {
-            handler->PSendSysMessage("Bot add failed: couldn't roll a %s (race %u, no name or no legal race/class). See Playerbot.log '[BotComposition] Roll exhausted'.",
-                                     class_arg.c_str(), uint32(race));
+            handler->PSendSysMessage(Tr(handler,
+                "Bot add failed: couldn't roll a %s (race %u, no name or no legal race/class). See Playerbot.log '[BotComposition] Roll exhausted'.",
+                "Не удалось добавить бота: не вышло создать «%s» (раса %u: нет имени или допустимой пары раса/класс). Подробности в Playerbot.log, строка '[BotComposition] Roll exhausted'."),
+                class_arg.c_str(), uint32(race));
             return Refuse(handler);
         }
 
         auto const created = Playerbot::V2::BotCharacterFactory::Create(sess, pick.name, race, cls, gender);
         if (!created.ok)
-        { handler->PSendSysMessage("Couldn't create the bot: %s", created.reason.c_str()); return Refuse(handler); }
+        { handler->PSendSysMessage(Tr(handler, "Couldn't create the bot: %s", "Не удалось создать бота: %s"), created.reason.c_str()); return Refuse(handler); }
 
         Playerbot::BotId const id = created.guid.GetCounter();
         Playerbot::Services::Owners().SetOwner(id, sess->GetAccountId(), me->GetGUID().GetCounter());
@@ -805,11 +892,12 @@ public:
         auto const login = Playerbot::Services::SessionMgr().LoginBot(created.guid);
         if (!login.ok)
         {
-            handler->PSendSysMessage("Created %s but the login was refused (%s). Try `.bot call %s`.",
+            handler->PSendSysMessage(Tr(handler, "Created %s but the login was refused (%s). Try `.bot call %s`.",
+                                        "Создан бот %s, но вход отклонён (%s). Попробуйте `.бот вызвать %s`."),
                                      pick.name.c_str(), login.reason.c_str(), pick.name.c_str());
             return Refuse(handler);
         }
-        handler->PSendSysMessage("%s is on the way.", pick.name.c_str());
+        handler->PSendSysMessage(Tr(handler, "%s is on the way.", "%s уже в пути."), pick.name.c_str());
         return true;
     }
 
@@ -817,7 +905,7 @@ public:
     static std::vector<Playerbot::BotId> CompanionsMatching(WorldSession const* sess, std::string const& who)
     {
         std::vector<Playerbot::BotId> out;
-        std::string const want = ToLowerAscii(who);
+        std::string const want = ArgWord(who);
         for (Playerbot::BotId id : Playerbot::Services::Owners().BotsOwnedBy(sess->GetAccountId()))
         {
             if (!Playerbot::Services::Lifecycle().is_bot(id))
@@ -861,12 +949,12 @@ public:
     static bool CallCompanions(ChatHandler* handler, std::string const& who, bool groupOnly)
     {
         if (!Playerbot::Services::Initialized())
-        { handler->SendSysMessage("PlayerbotV2 not initialized."); return Refuse(handler); }
+        { handler->SendSysMessage(NotInitializedText(handler)); return Refuse(handler); }
         WorldSession* sess = handler->GetSession();
         Player* me = sess ? sess->GetPlayer() : nullptr;
         if (!me)
-        { handler->SendSysMessage("`.bot call` is in-game only."); return Refuse(handler); }
-        bool const roster = ToLowerAscii(who) == "all";
+        { handler->SendSysMessage(Tr(handler, "`.bot call` is in-game only.", "Команда `.bot call` работает только в игре.")); return Refuse(handler); }
+        bool const roster = ArgWord(who) == "all";
         std::vector<Playerbot::BotId> ids;
         if (roster && groupOnly)
         {
@@ -875,7 +963,8 @@ public:
                 if (grp && grp->IsMember(ObjectGuid::Create<HighGuid::Player>(id)) && ObjectAccessor::FindConnectedPlayer(ObjectGuid::Create<HighGuid::Player>(id)))
                     ids.push_back(id);
             if (ids.empty())
-            { handler->SendSysMessage("None of your bots are in your group. `.bot summon <name>` brings one, `.bot call all` brings back your saved raid."); return Refuse(handler); }
+            { handler->SendSysMessage(Tr(handler, "None of your bots are in your group. `.bot summon <name>` brings one, `.bot call all` brings back your saved raid.",
+                                         "Ни одного из ваших ботов нет в группе. `.бот собрать <имя>` приведёт одного, `.бот вызвать все` вернёт ваш сохранённый рейд.")); return Refuse(handler); }
         }
         else
             ids = roster ? SavedCompanions(sess) : CompanionsMatching(sess, who);
@@ -909,9 +998,11 @@ public:
             }
         }
         if (ids.empty() && roster)
-        { handler->SendSysMessage("No saved or grouped companions. `.bot save all` saves the ones with you, `.bot call <name>` calls one."); return Refuse(handler); }
+        { handler->SendSysMessage(Tr(handler, "No saved or grouped companions. `.bot save all` saves the ones with you, `.bot call <name>` calls one.",
+                                     "Нет сохранённых или сгруппированных спутников. `.бот сохранить все` сохранит тех, кто с вами, `.бот вызвать <имя>` вызовет одного.")); return Refuse(handler); }
         if (ids.empty())
-        { handler->PSendSysMessage("No companion of yours called '%s'. `.bot list` shows them.", who.c_str()); return Refuse(handler); }
+        { handler->PSendSysMessage(Tr(handler, "No companion of yours called '%s'. `.bot list` shows them.",
+                                      "У вас нет спутника по имени '%s'. `.бот список` покажет всех."), who.c_str()); return Refuse(handler); }
         uint32 called = 0, refused = 0;
         // Open world: at most 5 of your companions out at a time. Inside an instance as many as the map holds, and the
         // group never grows past it. The rest stay where they are.
@@ -939,10 +1030,11 @@ public:
                 continue;
             ++called;
         }
-        handler->PSendSysMessage("Calling %u companion(s).", called);
+        handler->PSendSysMessage(Tr(handler, "Calling %u companion(s).", "Вызвано спутников: %u."), called);
         if (refused)
-            handler->PSendSysMessage("%s, %u companion(s) not called.",
-                                     Playerbot::V2::Fleet::InstanceGroupFullText(capName, inInstance ? members : out, cap).c_str(), refused);
+            handler->PSendSysMessage(Tr(handler, "%s, %u companion(s) not called.", "%s; не вызвано спутников: %u."),
+                                     Playerbot::V2::L10n::Localize(handler, Playerbot::V2::Fleet::InstanceGroupFullText(capName, inInstance ? members : out, cap)).c_str(),
+                                     refused);
         return true;
     }
 
@@ -959,17 +1051,18 @@ public:
         bool const init = Playerbot::Services::Initialized();
         // `saved` = the saved roster (`.bot save`) plus the grouped bots, logged in if need be: the addon's "Call saved" button.
         // `.bot call all` is the same but needs GM rights, which normal players do not have.
-        if (init && ToLowerAscii(who) == "saved")
+        if (init && ArgWord(who) == "saved")
         {
             CallCompanions(handler, "all", /*groupOnly*/ false);
             return true;
         }
-        if (init && !who.empty() && (ToLowerAscii(who) == "all" || !CompanionsMatching(sess, who).empty()))
+        if (init && !who.empty() && (ArgWord(who) == "all" || !CompanionsMatching(sess, who).empty()))
         {
             CallCompanions(handler, who, /*groupOnly*/ true);
             return true;
         }
-        handler->SendSysMessage("You can only summon your own bots: `.bot summon all` (your group), `.bot summon saved` or `.bot summon <bot name>`.");
+        handler->SendSysMessage(Tr(handler, "You can only summon your own bots: `.bot summon all` (your group), `.bot summon saved` or `.bot summon <bot name>`.",
+                                   "Вызывать можно только своих ботов: `.бот собрать все` (ваша группа), `.бот собрать сохранённые` или `.бот собрать <имя бота>`."));
         handler->SetSentErrorMessage(true);
         return false;
     }
@@ -1026,7 +1119,7 @@ public:
     static bool HandleBotGear(ChatHandler* handler, Optional<std::string> mode_arg)
     {
         if (!Playerbot::Services::Initialized())
-        { handler->SendSysMessage("PlayerbotV2 not initialized."); return false; }
+        { handler->SendSysMessage(NotInitializedText(handler)); return false; }
         WorldSession* sess = handler->GetSession();
         if (!sess)
         { handler->SendSysMessage("`.bot gear` is in-game only."); return false; }
@@ -1055,17 +1148,19 @@ public:
     {
         std::string const who = who_arg ? *who_arg : std::string("all");   // bare `.bot regear` = every companion
         if (!Playerbot::Services::Initialized())
-        { handler->SendSysMessage("PlayerbotV2 not initialized."); return false; }
+        { handler->SendSysMessage(NotInitializedText(handler)); return false; }
         WorldSession* sess = handler->GetSession();
         Player* me = sess ? sess->GetPlayer() : nullptr;
         if (!me)
-        { handler->SendSysMessage("`.bot regear` is in-game only."); return false; }
-        bool const roster = ToLowerAscii(who) == "all";
+        { handler->SendSysMessage(Tr(handler, "`.bot regear` is in-game only.", "Команда `.bot regear` работает только в игре.")); return false; }
+        bool const roster = ArgWord(who) == "all";
         auto const ids = roster ? SavedCompanions(sess) : CompanionsMatching(sess, who);
         if (ids.empty() && roster)
-        { handler->SendSysMessage("No saved or grouped companions. `.bot regear <name>` regears one."); return false; }
+        { handler->SendSysMessage(Tr(handler, "No saved or grouped companions. `.bot regear <name>` regears one.",
+                                     "Нет сохранённых или сгруппированных спутников. `.бот экипировка <имя>` переодевает одного.")); return false; }
         if (ids.empty())
-        { handler->PSendSysMessage("No companion of yours called '%s'. `.bot list` shows them.", who.c_str()); return false; }
+        { handler->PSendSysMessage(Tr(handler, "No companion of yours called '%s'. `.bot list` shows them.",
+                                      "У вас нет спутника по имени '%s'. `.бот список` покажет всех."), who.c_str()); return false; }
         uint32 regeared = 0;
         for (Playerbot::BotId id : ids)
         {
@@ -1073,7 +1168,7 @@ public:
             Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid::Create<HighGuid::Player>(id));
             if (!bot || !bot->IsInWorld())
             {
-                handler->PSendSysMessage("%s is offline: `.bot call %s` first.", name.c_str(), name.c_str());
+                handler->PSendSysMessage(Tr(handler, "%s is offline: `.bot call %s` first.", "%s не в сети: сначала `.бот вызвать %s`."), name.c_str(), name.c_str());
                 continue;
             }
             uint32 changed = 0;
@@ -1083,17 +1178,17 @@ public:
                 case Reroll::Done:
                     Playerbot::Services::Owners().MarkGearVaried(id);
                     ++regeared;
-                    handler->PSendSysMessage("%s: %u slot(s) regeared.", name.c_str(), changed);
+                    handler->PSendSysMessage(Tr(handler, "%s: %u slot(s) regeared.", "%s: переодето ячеек: %u."), name.c_str(), changed);
                     break;
                 case Reroll::NotNow:
-                    handler->PSendSysMessage("%s is in combat or dead, try again later.", name.c_str());
+                    handler->PSendSysMessage(Tr(handler, "%s is in combat or dead, try again later.", "%s в бою или мёртв, попробуйте позже."), name.c_str());
                     break;
                 default:
-                    handler->PSendSysMessage("%s is a player's own character; its gear is left alone.", name.c_str());
+                    handler->PSendSysMessage(Tr(handler, "%s is a player's own character; its gear is left alone.", "%s — персонаж игрока, его снаряжение не трогаю."), name.c_str());
                     break;
             }
         }
-        handler->PSendSysMessage("Regeared %u companion(s).", regeared);
+        handler->PSendSysMessage(Tr(handler, "Regeared %u companion(s).", "Переодето спутников: %u."), regeared);
         return true;
     }
 
@@ -1103,7 +1198,7 @@ public:
     static bool HandleBotDismiss(ChatHandler* handler, std::string const& who)
     {
         if (!Playerbot::Services::Initialized())
-        { handler->SendSysMessage("PlayerbotV2 not initialized."); return false; }
+        { handler->SendSysMessage(NotInitializedText(handler)); return false; }
         WorldSession* sess = handler->GetSession();
         if (!sess)
             return false;
@@ -1122,7 +1217,7 @@ public:
             if (Playerbot::Services::SessionMgr().LogoutBot(guid) || left_group)
                 ++dismissed;
         }
-        handler->PSendSysMessage("Dismissed %u companion(s).", dismissed);
+        handler->PSendSysMessage(Tr(handler, "Dismissed %u companion(s).", "Распущено спутников: %u."), dismissed);
         return true;
     }
 
@@ -1130,12 +1225,12 @@ public:
     static bool HandleBotSave(ChatHandler* handler, std::string const& who)
     {
         if (!Playerbot::Services::Initialized())
-        { handler->SendSysMessage("PlayerbotV2 not initialized."); return false; }
+        { handler->SendSysMessage(NotInitializedText(handler)); return false; }
         WorldSession* sess = handler->GetSession();
         Player* me = sess ? sess->GetPlayer() : nullptr;
         if (!me)
             return false;
-        bool const with_me = ToLowerAscii(who) == "all";
+        bool const with_me = ArgWord(who) == "all";
         std::string names;
         uint32 saved = 0;
         // Save group REPLACES the saved roster (playtest, 2026-10-11: after a second save the call said 78 saved where the first said 39: the
@@ -1197,11 +1292,14 @@ public:
         }
         if (!saved)
         {
-            handler->SendSysMessage(with_me ? "None of your companions is with you: `.bot call <name>` first."
-                                            : "No companion of yours by that name. `.bot list` shows them.");
+            handler->SendSysMessage(with_me ? Tr(handler, "None of your companions is with you: `.bot call <name>` first.",
+                                                 "Ни одного вашего спутника нет рядом: сначала `.бот вызвать <имя>`.")
+                                            : Tr(handler, "No companion of yours by that name. `.bot list` shows them.",
+                                                 "У вас нет спутника с таким именем. `.бот список` покажет всех."));
             return false;
         }
-        handler->PSendSysMessage("Saved %u companion(s): %s. `.bot call all` calls the saved ones.", saved, names.c_str());
+        handler->PSendSysMessage(Tr(handler, "Saved %u companion(s): %s. `.bot call all` calls the saved ones.",
+                                    "Сохранено спутников: %u (%s). `.бот вызвать все` вызовет сохранённых."), saved, names.c_str());
         return true;
     }
 
@@ -1209,7 +1307,7 @@ public:
     static bool HandleBotUnsave(ChatHandler* handler, std::string const& who)
     {
         if (!Playerbot::Services::Initialized())
-        { handler->SendSysMessage("PlayerbotV2 not initialized."); return false; }
+        { handler->SendSysMessage(NotInitializedText(handler)); return false; }
         WorldSession* sess = handler->GetSession();
         if (!sess)
             return false;
@@ -1220,7 +1318,7 @@ public:
                 Playerbot::Services::Owners().SetSaved(id, false);
                 ++removed;
             }
-        handler->PSendSysMessage("Took %u companion(s) off your saved list.", removed);
+        handler->PSendSysMessage(Tr(handler, "Took %u companion(s) off your saved list.", "Убрано из списка сохранённых: %u."), removed);
         return true;
     }
 
@@ -1228,15 +1326,16 @@ public:
     static bool HandleBotDelete(ChatHandler* handler, std::string const& who)
     {
         if (!Playerbot::Services::Initialized())
-        { handler->SendSysMessage("PlayerbotV2 not initialized."); return false; }
+        { handler->SendSysMessage(NotInitializedText(handler)); return false; }
         WorldSession* sess = handler->GetSession();
         if (!sess)
             return false;
-        if (ToLowerAscii(who) == "all")
-        { handler->SendSysMessage("`.bot delete` takes one name at a time."); return false; }
+        if (ArgWord(who) == "all")
+        { handler->SendSysMessage(Tr(handler, "`.bot delete` takes one name at a time.", "Команда `.bot delete` принимает одно имя за раз.")); return false; }
         auto const ids = CompanionsMatching(sess, who);
         if (ids.empty())
-        { handler->PSendSysMessage("No companion of yours called '%s'. `.bot list` shows them.", who.c_str()); return false; }
+        { handler->PSendSysMessage(Tr(handler, "No companion of yours called '%s'. `.bot list` shows them.",
+                                      "У вас нет спутника по имени '%s'. `.бот список` покажет всех."), who.c_str()); return false; }
         Player* me = sess->GetPlayer();
         for (Playerbot::BotId id : ids)
         {
@@ -1245,7 +1344,7 @@ public:
                 group->RemoveMember(guid);
             Playerbot::Services::SessionMgr().LogoutBot(guid);
             Playerbot::Services::Population().QueueCompanionDelete(id);
-            handler->PSendSysMessage("%s is leaving and will be deleted.", CompanionName(id).c_str());
+            handler->PSendSysMessage(Tr(handler, "%s is leaving and will be deleted.", "%s уходит и будет удалён."), CompanionName(id).c_str());
         }
         return true;
     }
@@ -1255,7 +1354,7 @@ public:
     static bool HandleBotWorld(ChatHandler* handler)
     {
         if (!Playerbot::Services::Initialized())
-        { handler->SendSysMessage("PlayerbotV2 not initialized."); return false; }
+        { handler->SendSysMessage(NotInitializedText(handler)); return false; }
         handler->SendSysMessage(Playerbot::Services::Population().WorldReport().c_str());
         return true;
     }
@@ -1264,7 +1363,7 @@ public:
     static bool HandleBotBgStress(ChatHandler* handler, Optional<uint16> bgType, Optional<uint32> cycles, Optional<uint32> holdSec)
     {
         if (!Playerbot::Services::Initialized())
-        { handler->SendSysMessage("PlayerbotV2 not initialized."); return false; }
+        { handler->SendSysMessage(NotInitializedText(handler)); return false; }
         if (!bgType)
         { handler->SendSysMessage(Playerbot::Services::Population().BgStressReport().c_str()); return true; }
         handler->SendSysMessage(Playerbot::Services::Population().StartBgStress(*bgType, cycles.value_or(3), holdSec.value_or(60)).c_str());
@@ -1275,7 +1374,7 @@ public:
     static bool HandleBotBgSoak(ChatHandler* handler, Optional<uint16> bgType, Optional<uint32> maxMinutes)
     {
         if (!Playerbot::Services::Initialized())
-        { handler->SendSysMessage("PlayerbotV2 not initialized."); return false; }
+        { handler->SendSysMessage(NotInitializedText(handler)); return false; }
         if (!bgType)
         { handler->SendSysMessage(Playerbot::Services::Population().BgSoakReport().c_str()); return true; }
         handler->SendSysMessage(Playerbot::Services::Population().StartBgSoak(*bgType, maxMinutes.value_or(30)).c_str());
@@ -1285,22 +1384,27 @@ public:
     static bool HandleBotList(ChatHandler* handler)
     {
         if (!Playerbot::Services::Initialized())
-        { handler->SendSysMessage("PlayerbotV2 not initialized."); return false; }
+        { handler->SendSysMessage(NotInitializedText(handler)); return false; }
         WorldSession* sess = handler->GetSession();
         if (!sess)
             return false;
         auto const ids = CompanionsMatching(sess, "all");
         if (ids.empty())
-        { handler->SendSysMessage("No companions yet. `.bot add <class> [tank|healer|dps]` makes one."); return true; }
+        { handler->SendSysMessage(Tr(handler, "No companions yet. `.bot add <class> [tank|healer|dps]` makes one.",
+                                     "Спутников пока нет. `.бот добавить <класс> [танк|лекарь|урон]` создаст одного.")); return true; }
         for (Playerbot::BotId id : ids)
         {
             ObjectGuid const guid = ObjectGuid::Create<HighGuid::Player>(id);
             CharacterCacheEntry const* info = sCharacterCache->GetCharacterCacheByGuid(guid);
             if (!info)
                 continue;
-            handler->PSendSysMessage("%s: level %u %s, %s%s", info->Name.c_str(), uint32(info->Level),
-                                     ClassName(info->Class), ObjectAccessor::FindConnectedPlayer(guid) ? "online" : "offline",
-                                     Playerbot::Services::Owners().GetOwner(id).saved ? ", saved" : "");
+            bool const ru = Playerbot::V2::L10n::IsRu(handler);
+            bool const online = ObjectAccessor::FindConnectedPlayer(guid) != nullptr;
+            bool const saved = Playerbot::Services::Owners().GetOwner(id).saved;
+            handler->PSendSysMessage(Tr(handler, "%s: level %u %s, %s%s", "%s: уровень %u, %s, %s%s"), info->Name.c_str(), uint32(info->Level),
+                                     ru ? ClassNameRu(info->Class) : ClassName(info->Class),
+                                     ru ? (online ? "в сети" : "не в сети") : (online ? "online" : "offline"),
+                                     saved ? (ru ? ", сохранён" : ", saved") : "");
         }
         return true;
     }

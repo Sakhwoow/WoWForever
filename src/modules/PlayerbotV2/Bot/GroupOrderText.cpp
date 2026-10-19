@@ -1,4 +1,5 @@
 #include "GroupOrderText.h"
+#include "BotL10nText.h"
 
 #include <algorithm>
 #include <array>
@@ -11,6 +12,15 @@ std::optional<std::string> ClassifyGroupOrder(std::string_view msg, bool owner_w
     if (msg.empty() || msg.front() == ';')
         return std::nullopt;
     std::string order(msg);
+    // A Russian line ("стой", "за мной", "бросить задание X") stands for the English order of BotL10nText.h; the allow-list below
+    // then decides on that English order exactly as for a typed one. Any other Russian line is ordinary chatter.
+    if (L10n::HasNonAscii(msg))
+    {
+        std::optional<std::string> const english = L10n::TranslateOrder(msg, /*group*/ true);
+        if (!english)
+            return std::nullopt;
+        order = *english;
+    }
     std::transform(order.begin(), order.end(), order.begin(), [](unsigned char c) { return char(std::tolower(c)); });
     order.erase(0, order.find_first_not_of(" \t"));
     order.erase(order.find_last_not_of(" \t") + 1);

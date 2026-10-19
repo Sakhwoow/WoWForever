@@ -20,6 +20,7 @@ what could not be confirmed. Server operators: the config keys are in `conf/play
 12. [Config keys](#12-config-keys)
 13. [Log tags for troubleshooting](#13-log-tags-for-troubleshooting)
 14. [Known gaps](#14-known-gaps)
+15. [Russian commands (Русские команды)](#15-russian-commands-русские-команды)
 
 ---
 
@@ -358,6 +359,133 @@ The module logs nothing unless `Logger.playerbot.v2=3` is set. Grep the server l
   separate attack-stance engine.
 - Quest words depend on `Bot/Quest/QuestOrders.h` (section 10).
 - Right-click unit-menu entry of the addon and the whisper `!` prefix are **(unverified)**.
+
+## 15. Russian commands (Русские команды)
+
+Everything in this guide also works in Russian. The Russian words are an alternative spelling of the English ones: a Russian
+order is turned into the English order it stands for and then runs through the unchanged parser, so it can do exactly what the
+English word can and nothing more. English keeps working as before.
+
+Rules:
+
+- Case does not matter (`Стой`, `СТОЙ`, `стой`), `ё` may be typed as `е`, and a `!` or `.` after an order is ignored.
+- In **party or raid chat** the whole line must be the order (`стой`, `все за мной`, `бросить задание Кабаны`). A longer sentence
+  such as `стой, куда ты побежал` is chatter and is ignored, as in English. Words that people also say to each other
+  (`кто`, `лут`, `сюда`, `хватит`) work by whisper only.
+- The chat command names (`.бот добавить`) are matched without regard to case for Latin letters only, so type them in lower case
+  (the root also works as `.Бот`).
+- **Replies**: a player whose client is Russian (ruRU, `Load.Locales = 1`) gets the command messages and the bots' confirmation
+  whispers in Russian; every other client gets the English text as before. Names that come from the game data (mobs, quests,
+  items, map names, spec names) stay as the server holds them, and the diagnostic dumps (`status`, `diag`, ...) and the GM
+  `.playerbot ...` commands stay English.
+
+### 15.1 Chat commands `.бот` (the same as `.bot`)
+
+| Russian | English | Notes |
+|---|---|---|
+| `.бот добавить <класс> [роль] [раса] [пол]` (also `добавь`) | `.bot add <class> [role] [race] [gender]` | `.бот добавить жрец лекарь`, `.бот добавить воин танк орк мужской` |
+| `.бот вызвать <имя\|все>` (`вызови`) | `.bot call <name\|all>` | |
+| `.бот собрать <имя\|все\|сохранённые>` (`собери`) | `.bot summon <name\|all\|saved>` | |
+| `.бот распустить <имя\|все>` (`распусти`, `отпустить`) | `.bot dismiss <name\|all>` | |
+| `.бот сохранить <имя\|все>` (`сохрани`) | `.bot save <name\|all>` | |
+| `.бот забыть <имя\|все>` (`забудь`, `убрать`) | `.bot unsave <name\|all>` | takes the bot off the saved list |
+| `.бот удалить <имя>` (`удали`) | `.bot delete <name>` | |
+| `.бот список` | `.bot list` | |
+| `.бот экипировка <имя\|все>` (`переодеть`, `переодень`) | `.bot regear <name\|all>` | |
+| `.бот о` (`справка`) | `.bot about` | GM |
+
+Words after the command (also valid after `.bot ...`):
+
+| Argument | Russian words |
+|---|---|
+| class | `воин`, `паладин`, `охотник`, `разбойник`, `жрец`, `шаман`, `маг`, `чернокнижник`, `друид`; also the object forms (`воина`, `жрицу`, `мага`), plural, `жрица`, `шаманка`, slang `пал`, `хант`, `рога`, `лок`, `дк` |
+| role | `танк`; `лекарь`, `хил`; `урон`, `дд`, `дамаг` |
+| race (Classic) | `человек`, `дворф`, `ночной эльф` (or `эльф`), `гном`, `орк`, `нежить`, `таурен`, `тролль` |
+| gender | `мужской` (`м`), `женский` (`ж`) |
+| who | `все` = `all`, `сохранённые` = `saved` |
+
+### 15.2 Orders to the bots
+
+By whisper, with a `;` in front in party chat, or (marked **group**) as a bare line in party or raid chat. The list gives the
+usual words; more spellings of the same kind exist (`стой` / `стойте` / `стоять`).
+
+| Russian | English order | Group |
+|---|---|---|
+| `следуй`, `за мной`, `иди за мной`, `сопровождай` | `follow` | yes |
+| `следуй за <имя>`, `следуй за танком` / `лекарем` / `лидером` | `follow <name>`, `follow tank` / `healer` / `leader` | whisper |
+| `не следуй`, `отстань` | `unfollow` | whisper |
+| `стой`, `стоять`, `жди`, `оставайся`, `замри` (also with `на месте`) | `stay` | yes |
+| `держать`, `держи позицию`, `удерживай позицию` | `hold` | yes |
+| `защита`, `оборона`, `защищайся` | `defensive` | yes |
+| `агрессия`, `агрессивно` | `aggressive` | yes |
+| `пассив`, `пассивно`, `не нападай`, `не атакуй` | `passive` | yes |
+| `продолжай`, `вольно`, `свободно`, `возобнови` | `resume` | yes |
+| `атака`, `атакуй`, `убей`, `бей`, `в бой`, `в атаку`, `нападай` | `attack` | yes |
+| `помоги`, `помогай`, `ассист` | `assist` (= `attack`) | yes |
+| `тяни`, `пулл`, `потяни`, `тяни моба` | `pull` | yes |
+| `тяни назад`, `пулл назад`, `оттяни` | `pull back` | yes |
+| `тяни по метке` | `pull rti` | yes |
+| `отход`, `отходим`, `отходи`, `назад`, `отступаем` | `fallback` (the whole raid runs to the rally point) | yes |
+| `сбор здесь`, `точка сбора здесь`, `собираемся здесь` | `rally here` | yes |
+| `беги`, `бегите`, `бежим`, `отступай`, `спасайся` | `flee` (run to you) | yes |
+| `ко мне`, `иди ко мне`, `иди сюда`, `подойди` | `come` | yes (`сюда` alone: whisper) |
+| `призови`, `призыв` | `summon` | yes |
+| `отпусти`, `отпусти дух`, `освободи дух` | `release` | yes |
+| `стоп` | `stop` | whisper |
+| `отбой`, `отставить` | `disengage` | yes |
+| `хватит`, `прекрати` | `disengage` | whisper |
+| `задания`, `квесты`, `список заданий` | `quests` | yes |
+| `принять`, `прими`, `принять все` | `accept`, `accept all` | yes |
+| `принять <задание>` | `accept <quest>` | whisper |
+| `сдать`, `сдай`, `сдать задания` | `turn in` | yes |
+| `бросить задание <название>` | `drop quest <name>` | yes |
+| `бросить <задание>`, `брось <задание>` | `drop <quest>` | whisper |
+| `поделиться`, `поделись`, `поделись заданиями` | `share` | yes |
+| `надеть улучшения`, `надень лучшее` | `equip upgrades` | yes |
+| `надень <предмет или ссылка>` | `equip <item>` | whisper |
+| `создать <предмет>`, `создай`, `скрафти`, `крафт` | `craft <item>` (`создай список` = `craft list`) | whisper |
+| `помощь`, `справка` | `help` | yes |
+| `команды` | `commands` | whisper |
+| `кто ты`, `представься` (whisper: `кто`) | `who` | yes |
+| `покажи статы` (whisper: `статы`, `характеристики`) | `stats` | yes |
+| `покажи экипировку` (whisper: `экипировка`, `снаряжение`) | `gear` | yes |
+| `инвентарь`, `сумки` | `inv` | whisper |
+| `деньги`, `золото` | `money` | whisper |
+| `лут все` (whisper: `лут`) | `loot all` (`loot`) | yes (`лут все`) |
+| `продай серое`, `продать хлам` | `sell grey` | yes |
+| `починись`, `почини снаряжение` | `repair` | yes |
+| `формация круг` / `стрелка` / `клин` / `линия` / `колонна` / `нет` (also `строй ...`) | `formation circle` / `arrow` / `wedge` / `line` / `column` / `none` | yes |
+| `плотный строй`, `обычный строй`, `широкий строй`, `рассредоточиться` | `tight`, `close`, `spread out` | yes |
+| `интервал плотно` / `близко` / `широко` | `spacing tight` / `close` / `spread` | yes |
+| `дистанция <n>` (`дистанция 8 ярдов`) | `distance <n>` | yes |
+| `главный танк`, `главный танк <имя>`, `назначь главным танком <имя>` | `set main tank [<name>]` | yes |
+| `сядь`, `встань`, `слезь`, `в седло`, `домой`, `покинь группу`, `пригласи`, `сброс`, `проверка готовности` | `sit`, `stand`, `dismount`, `mount`, `hearth`, `leave`, `invite`, `reset`, `readycheck` | whisper |
+
+Addressing several bots, by whisper or after `;` (a name is kept as typed):
+
+| Russian | English |
+|---|---|
+| `все: стой`, `всем стоять`, `все за мной` | `all: stay`, `all: follow` |
+| `отряд:` (`группа:`), `здесь:` | `squad:`, `here:` |
+| `танки: тяни`, `лекари: за мной`, `дд: атака` | `tank: pull`, `healer: follow`, `dps: attack` |
+| `маги: атака`, `воины: стой` | `mage: attack`, `warrior: stay` |
+| `Raveni: стой` | `Raveni: stay` |
+
+### 15.3 Examples
+
+```
+.бот добавить жрец лекарь          -> .bot add priest healer
+.бот добавить воин танк орк        -> .bot add warrior tank orc
+.бот вызвать все                   -> .bot call all
+.бот распустить Raveni
+/w Raveni следуй                   -> Raveni: следую за вами, дистанция 5 ярд.
+/w Raveni бросить задание Кабаны   -> drop quest (the quest id or link works with any language)
+;танки: тяни                       -> in party chat: only the tanks pull
+стой                               -> in party chat: every bot of yours stays
+```
+
+Quest names are matched against the quest log as the server holds them (English); to drop or share a quest by name from a
+Russian client, shift-click the quest link or give its number.
 
 ## Auction house bot (GM)
 
