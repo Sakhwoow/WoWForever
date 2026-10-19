@@ -36,10 +36,12 @@
 #include <mutex>
 #include <unordered_map>
 
+using namespace Trinity::ChatCommands;
+
 namespace
 {
     std::mutex RatesLock;
-    std::unordered_map<uint64, uint32> Rates;   // character guid -> chosen rate, only players with a rate above 1
+    std::unordered_map<uint64, uint32> PersonalRates;   // character guid -> chosen rate, only players with a rate above 1
 
     bool Enabled()
     {
@@ -59,8 +61,8 @@ namespace
     uint32 GetRate(uint64 guid)
     {
         std::lock_guard<std::mutex> guard(RatesLock);
-        auto itr = Rates.find(guid);
-        return itr != Rates.end() ? itr->second : 1;
+        auto itr = PersonalRates.find(guid);
+        return itr != PersonalRates.end() ? itr->second : 1;
     }
 
     void SetRate(Player* player, uint32 rate)
@@ -69,9 +71,9 @@ namespace
         {
             std::lock_guard<std::mutex> guard(RatesLock);
             if (rate <= 1)
-                Rates.erase(guid);
+                PersonalRates.erase(guid);
             else
-                Rates[guid] = rate;
+                PersonalRates[guid] = rate;
         }
 
         if (rate <= 1)
@@ -100,15 +102,15 @@ public:
         uint32 const rate = std::clamp<uint32>((*result)[0].GetUInt8(), MinRate(), MaxRate());
         std::lock_guard<std::mutex> guard(RatesLock);
         if (rate > 1)
-            Rates[guid] = rate;
+            PersonalRates[guid] = rate;
         else
-            Rates.erase(guid);
+            PersonalRates.erase(guid);
     }
 
     void OnLogout(Player* player) override
     {
         std::lock_guard<std::mutex> guard(RatesLock);
-        Rates.erase(player->GetGUID().GetCounter());
+        PersonalRates.erase(player->GetGUID().GetCounter());
     }
 
     void OnDelete(ObjectGuid guid, uint32 /*accountId*/) override
