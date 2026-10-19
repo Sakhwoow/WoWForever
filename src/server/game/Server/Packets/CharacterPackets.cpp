@@ -938,7 +938,7 @@ void SetPlayerDeclinedNames::Read()
     catch (ByteBufferException const&)
     {
         Parsed = false;
-        RawHex = ByteArrayToHexStr(_worldPacket.contents(), std::min<size_t>(_worldPacket.size(), 600));
+        RawHex = ByteArrayToHexStr(_worldPacket.data(), std::min<size_t>(_worldPacket.size(), 600));
     }
 }
 
