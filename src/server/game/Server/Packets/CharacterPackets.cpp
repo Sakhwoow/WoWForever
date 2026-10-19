@@ -938,7 +938,7 @@ void SetPlayerDeclinedNames::Read()
     catch (ByteBufferException const&)
     {
         Parsed = false;
-        RawHex = ByteArrayToHexStr(static_cast<uint8 const*>(_worldPacket.data()), std::min<size_t>(_worldPacket.size(), 600), false);
+        RawHex = Trinity::Impl::ByteArrayToHexStr(static_cast<uint8 const*>(_worldPacket.data()), std::min<size_t>(_worldPacket.size(), 600), false);
     }
 }
 
