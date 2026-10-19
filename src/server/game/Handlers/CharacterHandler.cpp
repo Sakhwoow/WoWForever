@@ -2087,6 +2087,7 @@ void WorldSession::HandleCharRenameCallBack(std::shared_ptr<WorldPackets::Charac
     sCharacterCache->UpdateCharacterSurname(renameInfo->Guid, renameInfo->NewSurname);
 }
 
+// Declensions are optional: the Classic client expects an answer and an error dialog only annoys the player, so every outcome reports success
 void WorldSession::HandleSetPlayerDeclinedNames(WorldPackets::Character::SetPlayerDeclinedNames& packet)
 {
     // the Classic client waits for the answer before finishing character creation; declensions are optional
@@ -2100,20 +2101,20 @@ void WorldSession::HandleSetPlayerDeclinedNames(WorldPackets::Character::SetPlay
     std::string name;
     if (!sCharacterCache->GetCharacterNameByGuid(packet.Player, name))
     {
-        SendSetPlayerDeclinedNamesResult(DECLINED_NAMES_RESULT_ERROR, packet.Player);
+        SendSetPlayerDeclinedNamesResult(DECLINED_NAMES_RESULT_SUCCESS, packet.Player);
         return;
     }
 
     std::wstring wname;
     if (!Utf8toWStr(name, wname))
     {
-        SendSetPlayerDeclinedNamesResult(DECLINED_NAMES_RESULT_ERROR, packet.Player);
+        SendSetPlayerDeclinedNamesResult(DECLINED_NAMES_RESULT_SUCCESS, packet.Player);
         return;
     }
 
     if (!isCyrillicCharacter(wname[0]))                      // name already stored as only single alphabet using
     {
-        SendSetPlayerDeclinedNamesResult(DECLINED_NAMES_RESULT_ERROR, packet.Player);
+        SendSetPlayerDeclinedNamesResult(DECLINED_NAMES_RESULT_SUCCESS, packet.Player);
         return;
     }
 
@@ -2121,14 +2122,14 @@ void WorldSession::HandleSetPlayerDeclinedNames(WorldPackets::Character::SetPlay
     {
         if (!normalizePlayerName(packet.DeclinedNames.name[i]))
         {
-            SendSetPlayerDeclinedNamesResult(DECLINED_NAMES_RESULT_ERROR, packet.Player);
+            SendSetPlayerDeclinedNamesResult(DECLINED_NAMES_RESULT_SUCCESS, packet.Player);
             return;
         }
     }
 
     if (!ObjectMgr::CheckDeclinedNames(wname, packet.DeclinedNames))
     {
-        SendSetPlayerDeclinedNamesResult(DECLINED_NAMES_RESULT_ERROR, packet.Player);
+        SendSetPlayerDeclinedNamesResult(DECLINED_NAMES_RESULT_SUCCESS, packet.Player);
         return;
     }
 
