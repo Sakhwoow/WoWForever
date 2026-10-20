@@ -36,6 +36,7 @@
 #include "Map.h"
 #include "MapManager.h"
 #include "PhasingHandler.h"
+#include "TerrainMgr.h"
 #include "SpreadSpot.h"
 #include "GrindSpot.h"
 #include "ObjectMgr.h"
@@ -45,6 +46,9 @@
 
 #include <array>
 #include <cstring>
+#include <algorithm>
+#include <deque>
+#include <string>
 #include <vector>
 
 namespace Playerbot::V2::World {
@@ -311,8 +315,38 @@ std::vector<ResolvedTown> const& VanillaTowns()
                 out.push_back({ &t, side, found->Pos.X, found->Pos.Y, found->Pos.Z, found->Facing });
             }
         }
-        TC_LOG_INFO("playerbot.v2", "[ZonePicker] Classic: {} vanilla town flight points resolved{}{}",
-            uint32(out.size()), missing.empty() ? "" : "; not in TaxiNodes: ", missing);
+        // Fallback for data without English names (the server holds the extracted locale only, e.g. ruRU, so no name above matches):
+        // every flight point on the two continents that stands in a vanilla leveling zone (1.12 level range above 10, not a
+        // capital) is a town of that zone, found by the zone id of its position. The names stay as the data has them.
+        static std::deque<VanillaTown> synthTowns;
+        static std::deque<std::string> synthNames;
+        uint32 synthCount = 0;
+        for (TaxiNodesEntry const* node : sTaxiNodesStore)
+        {
+            if (!node || (node->ContinentID != 0 && node->ContinentID != 1)) continue;
+            bool const toAlliance = NodeShownTo(node, true);
+            bool const toHorde = NodeShownTo(node, false);
+            if (!toAlliance && !toHorde) continue;
+            uint32 const zone = sTerrainMgr.GetZoneId(PhasingHandler::GetEmptyPhaseShift(), node->ContinentID, node->Pos.X, node->Pos.Y, node->Pos.Z);
+            uint8 lo = 0, hi = 0;
+            if (!VanillaZoneLevelRange(zone, lo, hi) || hi <= 10 || IsVanillaCapitalZone(zone)) continue;
+            // a node that a named row above already resolved is not added a second time
+            bool dup = false;
+            for (ResolvedTown const& r : out)
+                if (r.x == node->Pos.X && r.y == node->Pos.Y && r.town->map == node->ContinentID) { dup = true; break; }
+            if (dup) continue;
+            synthNames.emplace_back(node->Name[locale] && *node->Name[locale] ? node->Name[locale] : "taxi node");
+            synthTowns.push_back({ synthNames.back().c_str(), uint16(node->ContinentID), uint8(std::max<uint8>(lo, 10)), hi, toAlliance, toHorde });
+            VanillaTown const* st = &synthTowns.back();
+            for (bool side : { true, false })
+            {
+                if (side ? !toAlliance : !toHorde) continue;
+                out.push_back({ st, side, node->Pos.X, node->Pos.Y, node->Pos.Z, node->Facing });
+                ++synthCount;
+            }
+        }
+        TC_LOG_INFO("playerbot.v2", "[ZonePicker] Classic: {} vanilla town flight points resolved ({} of them found by zone){}{}",
+            uint32(out.size()), synthCount, missing.empty() ? "" : "; named rows not in TaxiNodes: ", missing);
         return out;
     }();
     return towns;
