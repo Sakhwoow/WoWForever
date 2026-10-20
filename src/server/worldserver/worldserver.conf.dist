@@ -4791,6 +4791,45 @@ XpRateCommand.Enable = 1
 XpRateCommand.Min = 1
 XpRateCommand.Max = 5
 
+###################################################################################################
+# AUTOMATIC SERVER RESTART
+#
+#    ServerAutoShutdown.Enabled
+#        Description: Scheduled restart of the world server every N days or on one weekday, with the usual in-game countdown
+#                     (the same messages as the GM command ".server restart"). The process exits and the supervisor
+#                     (forever_watchdog.sh) starts it again.
+#        Default:     0 - (Disabled)
+#                     1 - (Enabled)
+
+ServerAutoShutdown.Enabled = 0
+
+#    ServerAutoShutdown.EveryDays
+#        Description: Restart every N days (1 - 365). Ignored when ServerAutoShutdown.Weekday is set.
+#        Default:     1
+
+ServerAutoShutdown.EveryDays = 1
+
+#    ServerAutoShutdown.Weekday
+#        Description: Restart only on this day of the week (0 = Sunday ... 6 = Saturday). -1 uses EveryDays.
+#        Default:     -1
+
+ServerAutoShutdown.Weekday = -1
+
+#    ServerAutoShutdown.Time
+#    ServerAutoShutdown.Time2
+#        Description: Restart time (server local time, HH:MM:SS). Time2 is an optional second restart in the same day;
+#                     leave it empty to use only Time.
+#        Default:     "04:00:00", ""
+
+ServerAutoShutdown.Time = "04:00:00"
+ServerAutoShutdown.Time2 = ""
+
+#    ServerAutoShutdown.PreAnnounce.Seconds
+#        Description: How many seconds before the restart the countdown starts (less than 86400).
+#        Default:     3600 - (1 hour)
+
+ServerAutoShutdown.PreAnnounce.Seconds = 3600
+
 #    Classic.OpcodeGroupShift
 #        Description: Client 1.60.1.70291 numbers the message groups one higher than 70245 (and changed some packet and
 #                     update field layouts). -1 picks it from the realm's game build (realmlist.gamebuild >= 70291).

@@ -819,6 +819,7 @@ class TC_GAME_API World
         void InitRandomBGResetTime();
         void InitCalendarOldEventsDeletionTime();
         void InitGuildResetTime();
+        void InitAutoRestartTime();
         void ResetRandomBG();
         void CalendarDeleteOldEvents();
         void ResetGuildCap();
@@ -876,6 +877,12 @@ class TC_GAME_API World
         time_t m_NextRandomBGReset;
         time_t m_NextCalendarOldEventsDeletionTime;
         time_t m_NextGuildReset;
+
+        // ServerAutoShutdown.* - scheduled daily/weekly server restart, computed once at startup by InitAutoRestartTime().
+        // Index 0 = ServerAutoShutdown.Time, 1 = ServerAutoShutdown.Time2. 0 means the slot is disabled (not configured, invalid
+        // or already fired during this run).
+        time_t m_NextAutoRestartPreAnnounce[2] = { 0, 0 };
+        uint32 m_AutoRestartAnnounceSeconds[2] = { 0, 0 };
         time_t m_NextCurrencyReset;
 
         //Player Queue
