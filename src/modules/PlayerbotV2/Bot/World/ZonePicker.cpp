@@ -347,6 +347,9 @@ std::vector<ResolvedTown> const& VanillaTowns()
         }
         TC_LOG_INFO("playerbot.v2", "[ZonePicker] Classic: {} vanilla town flight points resolved ({} of them found by zone){}{}",
             uint32(out.size()), synthCount, missing.empty() ? "" : "; named rows not in TaxiNodes: ", missing);
+        for (ResolvedTown const& r : out)
+            TC_LOG_INFO("playerbot.v2", "[ZonePicker] town '{}' map {} L{}-{} {} ({:.1f} {:.1f} {:.1f}) o {:.2f}", r.town->town, uint32(r.town->map),
+                uint32(r.town->lo), uint32(r.town->hi), r.alliance ? "A" : "H", r.x, r.y, r.z, r.o);
         return out;
     }();
     return towns;

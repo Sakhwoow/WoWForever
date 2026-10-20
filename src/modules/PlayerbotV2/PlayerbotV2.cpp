@@ -813,6 +813,10 @@ void Module::Init()
     // into per-tick navmesh loads on the map worker thread.
     World::PrewarmCommonZones();
 
+    // Resolve the vanilla leveling towns once at startup (logs every town found), instead of at the first bot placement.
+    if (::Playerbot::IsVanillaRealm())
+        (void)World::PickVanillaLevelingTown(10, true, 0, 0);
+
     // Pin all battleground terrain (grid maps + vmap tiles + mmap tiles)
     // resident for the server's lifetime. BG maps are instanced; without
     // the pin their tiles unload when the last match ends and the next
