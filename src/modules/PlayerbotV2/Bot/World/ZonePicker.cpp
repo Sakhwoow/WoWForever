@@ -280,6 +280,15 @@ std::vector<ResolvedTown> const& VanillaTowns()
         std::vector<ResolvedTown> out;
         LocaleConstant const locale = ::World::instance()->GetDefaultDbcLocale();   // sWorld would resolve to this namespace
         std::string missing;
+        // Diagnostics: the towns below are looked up by their English names, but the server may only hold the extracted locale's
+        // names (ruRU). Dump the Eastern Kingdoms / Kalimdor nodes once so the names and ids can be matched by hand.
+        for (TaxiNodesEntry const* node : sTaxiNodesStore)
+        {
+            if (!node || (node->ContinentID != 0 && node->ContinentID != 1)) continue;
+            TC_LOG_INFO("playerbot.v2", "[ZonePicker] taxi node {} map {} ({:.0f} {:.0f} {:.0f}) name '{}' enUS '{}' alliance {} horde {}",
+                node->ID, node->ContinentID, node->Pos.X, node->Pos.Y, node->Pos.Z, node->Name[locale] ? node->Name[locale] : "",
+                node->Name[LOCALE_enUS] ? node->Name[LOCALE_enUS] : "", NodeShownTo(node, true), NodeShownTo(node, false));
+        }
         for (VanillaTown const& t : kVanillaTowns)
         {
             for (bool side : { true, false })
