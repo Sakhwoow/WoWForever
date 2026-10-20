@@ -230,6 +230,55 @@ local RU = {
     ["/fb assign <name|target> <star|circle|diamond|triangle|moon|square|cross|skull> [tank|cc|kill]; /fb assign clear [marker|name]; /fb assign list"] = "/fb assign <имя|target> <star|circle|diamond|triangle|moon|square|cross|skull> [tank|cc|kill]; /fb assign clear [метка|имя]; /fb assign list",
     ["/fb tank <name> <skull|cross|star|circle|diamond|triangle|moon|square|clear>; /fb tank clear"] = "/fb tank <имя> <skull|cross|star|circle|diamond|triangle|moon|square|clear>; /fb tank clear",
     ["Whisper/Invite entries in the portrait right-click menu: %s (takes effect after /reload)  (/fb menu on|off)"] = "пункты «Шепнуть/Пригласить» в меню портрета: %s (вступит в силу после /reload)  (/fb menu on|off)",
+    ["Healer"] = "Лекарь",
+    ["Damage"] = "Урон",
+    ["Orders"] = "Приказы",
+    ["Bots"] = "Боты",
+    ["Form"] = "Строй",
+    ["Marks"] = "Метки",
+    ["No bots with you yet: see the Bots tab."] = "С вами пока нет ботов: см. вкладку «Боты».",
+    ["%d bots"] = "ботов: %d",
+    ["No bots"] = "Нет ботов",
+    ["Aggr."] = "Агр.",
+    ["Passive (the start setting): bots start nothing, fight only what you pull or what attacks the group, and come back to follow you. Aggressive: they also attack anything hostile within about 10 yards of you. Shows what you last sent; it is sent again to every bot that joins."] = "Пассив (по умолчанию): боты сами ничего не начинают, бьют только тех, кого вы привели или кто напал на группу, и возвращаются к вам. Агрессия: они также атакуют всё враждебное примерно в 10 ярдах от вас. Кнопка показывает последний отправленный режим; он повторно отправляется каждому боту, который вступает в группу.",
+    ["Use area spells freely"] = "АоЕ без ограничений",
+    ["Crowd-control marked mobs"] = "Контроль помеченных мобов",
+    ["The bots crowd-control the mobs you mark (give a bot and a mob the same icon, see Marks)."] = "Боты контролируют помеченных вами мобов (поставьте боту и мобу одинаковый значок, см. вкладку «Метки»).",
+    ["Add a %s bot"] = "Добавить бота: %s",
+    ["A new bot joins you at your level, wearing the gear chosen below."] = "Новый бот присоединится к вам на вашем уровне в снаряжении, выбранном ниже.",
+    ["Pick the class, then a role below."] = "Выберите класс, затем роль ниже.",
+    ["Quick party"] = "Быстрая группа",
+    ["Adds a tank, a healer and three damage dealers at your level."] = "Добавляет танка, лекаря и трёх бойцов вашего уровня.",
+    ["Gear:"] = "Снар.:",
+    ["Gear: %s"] = "Снаряжение: %s",
+    ["The gear the next bots wear. Click to go to the next choice: Match, Best, BiS, T1, T2, T3."] = "Снаряжение следующих ботов. Щелчок — следующий вариант: Как я, Лучшее, BiS, T1, T2, T3.",
+    ["Your saved bots"] = "Сохранённые боты",
+    ["Shape"] = "Построение",
+    ["Spacing"] = "Интервал",
+    ["None"] = "Нет",
+    ["How far the bots follow you out of combat, 2 to 20 yards. Also sets the formation spacing."] = "Как далеко боты следуют за вами вне боя, от 2 до 20 ярдов. Также задаёт интервал построения.",
+    ["Target a bot, then click an icon."] = "Выберите бота целью, затем щёлкните значок.",
+    ["Removes every icon assignment. Right-click an icon to clear just that one."] = "Снимает все назначения на значки. Правый щелчок по значку снимает только его.",
+    ["Tanks"] = "Танки",
+    ["Main tank"] = "Главный танк",
+    ["Mark:"] = "Метка:",
+    ["Alone: calls your saved bots. Already in a group: uses that group and never changes it. Makes the group a raid if it needs one, sets the formation and spacing, and starts a ready check once the bots have buffed. Target your main tank first to set the Main Tank flag too. Not in combat."] = "Если вы одни, вызывает сохранённых ботов. Если вы уже в группе, берёт эту группу и не меняет её. При необходимости преобразует группу в рейд, задаёт построение и интервал и запускает проверку готовности, когда боты наложат баффы. Чтобы назначить и главного танка, сначала выберите его целью. Не в бою.",
+    ["Call saved bots"] = "Вызвать сохранённых",
+    ["Dismiss all bots"] = "Отпустить всех ботов",
+    ["Hide this button"] = "Скрыть эту кнопку",
+    ["minimap button hidden: /fb minimap brings it back."] = "кнопка у миникарты скрыта; вернуть её: /fb minimap.",
+    ["Click: open or close the bot window"] = "Щелчок: открыть или закрыть окно ботов",
+    ["Right-click: raid ready, call, dismiss"] = "Правый щелчок: рейд готов, вызвать, отпустить",
+    ["Drag: move this button"] = "Перетаскивание: переместить кнопку",
+    ["minimap button: hidden  (/fb minimap on|off|reset)"] = "кнопка у миникарты: скрыта  (/fb minimap on|off|reset)",
+    ["minimap button: shown  (/fb minimap on|off|reset)"] = "кнопка у миникарты: показана  (/fb minimap on|off|reset)",
+    ["window size: %.2f  (/fb scale %s-%s, default %s)"] = "размер окна: %.2f  (/fb scale %s-%s, по умолчанию %s)",
+    ["debug output: on (until you log out or /reload)  (/fb debug on|off)"] = "отладочный вывод: вкл (до выхода из игры или /reload)  (/fb debug on|off)",
+    ["debug output: off  (/fb debug on|off)"] = "отладочный вывод: выкл  (/fb debug on|off)",
+    ["the client blocked %s() for the add-on %s (%s)"] = "клиент заблокировал %s() для аддона %s (%s)",
+    ["the client blocked %s() for ForeverBots (blocked) during: %s"] = "клиент заблокировал %s() для ForeverBots (blocked) на шаге: %s",
+    ["the client blocked RunMacroText() (an order button's macro) during: %s; tainted globals: %s"] = "клиент заблокировал RunMacroText() (макрос кнопки приказа) на шаге: %s; заражённые глобальные: %s",
+    ["/fb opens the window; /fb add <class> [tank|healer|dps]; /fb raidready; /fb call|dismiss|save|unsave|regear [name|all]; /fb delete <name>; /fb list; /fb fallback; /fb pullback; /fb rally; /fb formation circle|arrow|line|none; /fb spacing tight|close|spread; /fb distance <1-20>; /fb maintank [name]; /fb bot on|off; /fb tank <name> <marker>|clear; /fb assign <name> <marker> [role]|clear|list; /fb minimap on|off|reset; /fb scale <0.7-1.5>; /fb resume; /fb flee; /fb quick; /fb debug on|off"] = "/fb открывает окно; /fb add <класс> [tank|healer|dps]; /fb raidready; /fb call|dismiss|save|unsave|regear [имя|all]; /fb delete <имя>; /fb list; /fb fallback; /fb pullback; /fb rally; /fb formation circle|arrow|line|none; /fb spacing tight|close|spread; /fb distance <1-20>; /fb maintank [имя]; /fb bot on|off; /fb tank <имя> <метка>|clear; /fb assign <имя> <метка> [роль]|clear|list; /fb minimap on|off|reset; /fb scale <0.7-1.5>; /fb resume; /fb flee; /fb quick; /fb debug on|off. Команды сервера остаются английскими: warrior, priest, tank, healer, dps.",
 }
 local function T(text)
     if RU_CLIENT then return RU[text] or text end
@@ -270,8 +319,12 @@ local CLASSES = {
 
 local ROLE_LABEL = { tank = "Tank", healer = "Heal", dps = "DPS" }
 
+-- What the add-on was doing when the client blocked a call: set before the steps that touch the client's own frames.
+local currentStep = ""
+local function Step(name) currentStep = name or "" end
+
 local function Print(msg)
-    DEFAULT_CHAT_FRAME:AddMessage("|cff66ccffWoW Forever Bots|r: " .. msg)
+    DEFAULT_CHAT_FRAME:AddMessage("|cff66ccffWoW Forever Bots|r: " .. T(msg))
 end
 
 -- Diagnostic output that nobody asked for (group roster, battleground hints) goes through Debug: silent unless "/fb debug on",
@@ -282,7 +335,12 @@ local function Debug(msg)
 end
 
 -- A dot command is handled by the server when it arrives as a normal say message.
+local helloDotSent = false
 local function ServerCommand(text)
+    if not helloDotSent then
+        helloDotSent = true
+        SendChatMessage(".bot addon", "SAY")
+    end
     SendChatMessage(text, "SAY")
 end
 
@@ -294,15 +352,19 @@ end
 -- What the button shows: the pick; before one, "Passive" (nothing is sent until you pick, the server starts every grouped bot Passive).
 local function StanceLabel()
     local stance = ForeverBotsDB and ForeverBotsDB.stance
-    if stance == "aggressive" then return T("Aggressive") end
-    if stance == "passive" then return T("Passive") end
+    if stance == "aggressive" then return "Aggressive" end
+    if stance == "passive" then return "Passive" end
     -- Nothing picked yet: every bot in your group starts Passive on the server (it fights only what the group pulled or what
     -- attacks the group, and follows you back), so the button says so.
-    return T("Passive")
+    return "Passive"
 end
 local stanceBtn
 local function RefreshStance()
-    if stanceBtn then stanceBtn:SetText(StanceLabel()) end
+    if stanceBtn then
+        stanceBtn:SetText(T(StanceLabel()))
+        -- bar.tga rows 5 (blue, Passive) and 6 (red, Aggressive)
+        if stanceBtn.FBSetRow then stanceBtn:FBSetRow(StanceIsAggressive() and 6 or 5) end
+    end
 end
 
 -- Bot orders go to the group as addon messages under a fixed prefix; the server reads them like party chat. SendChatMessage
@@ -324,13 +386,27 @@ end
 local THROTTLED = { [3] = true, [8] = true }
 local ORDER_RETRIES = 6
 
+-- Anything the add-on sends on its own (a timer, OnUpdate, an event) is not a player action: the client blocks chat sent from
+-- there ("Interface action failed because of an AddOn", Emberseer 2026-10-20). Those paths run under Auto(), and GroupOrder then
+-- only ever uses the addon message (never SendChatMessage, never the chat box) and drops the order when that fails.
+local inAuto = false
+local function Auto(fn, ...)
+    local was, step = inAuto, currentStep
+    inAuto = true
+    Step("timer/event send")
+    local ok, err = pcall(fn, ...)
+    inAuto = was
+    Step(step)
+    if not ok then Debug("auto: " .. tostring(err)) end
+end
+
 local function GroupOrder(text, attempt)
     attempt = attempt or 0
     local channel
     if IsInRaid and IsInRaid() then channel = "RAID"
     elseif (IsInGroup and IsInGroup()) or (GetNumPartyMembers and GetNumPartyMembers() > 0) then channel = "PARTY"
     else
-        Print(T("you have no group yet: add a bot first."))
+        Print("you have no group yet: add a bot first.")
         return
     end
     local code, errText
@@ -342,9 +418,13 @@ local function GroupOrder(text, attempt)
         if sent then return end
         if ok then code = tonumber(res) or (res == false and -1 or nil) else errText = tostring(res) end
         if code and THROTTLED[code] and attempt < ORDER_RETRIES and C_Timer and C_Timer.After then
-            C_Timer.After(0.8, function() GroupOrder(text, attempt + 1) end)
+            C_Timer.After(0.8, function() Auto(GroupOrder, text, attempt + 1) end)
             return
         end
+    end
+    if inAuto or attempt > 0 then
+        Debug("order not sent from a timer/event: " .. tostring(text) .. (code and (" (addon message result " .. code .. ")") or ""))
+        return
     end
     if InCombatLockdown and InCombatLockdown() then
         -- The client lets the player's own Enter send chat in combat (typing "pull back" in raid chat works while the button does
@@ -429,7 +509,7 @@ StaticPopupDialogs["FOREVERBOTS_DELETE"] = {
 local function DeleteTarget()
     local name = UnitExists("target") and UnitIsPlayer("target") and SafeName("target")
     if not name or UnitIsUnit("target", "player") then
-        Print(T("target the bot you want to delete first."))
+        Print("target the bot you want to delete first.")
         return
     end
     local dialog = StaticPopup_Show("FOREVERBOTS_DELETE", name)
@@ -461,9 +541,9 @@ local statusFS                -- one-line confirmation under the icon row, fille
 local lastAssign              -- { name, marker (1..8), role, at } of the click still waiting for the server
 
 local function SetStatus(text)
-    if statusFS then statusFS:SetText(text or "") end
+    if statusFS then statusFS:SetText(T(text or "")) end
 end
-local MAX_LIST = 8
+local MAX_LIST = 5
 
 InGroupQuiet = function()
     return (IsInRaid and IsInRaid()) or (IsInGroup and IsInGroup()) or (GetNumPartyMembers and GetNumPartyMembers() > 0)
@@ -508,7 +588,11 @@ local function RequestList()
     if okI and inInstance and (kind == "pvp" or kind == "arena") then return end
     if InGroupQuiet() then
         local asker = ListAsker()
-        if asker then SendChatMessage("assign list", "WHISPER", nil, asker) end
+        if asker and prefixOk then
+            -- from a timer: an addon whisper (the server reads the FBOTS prefix like a whisper), never SendChatMessage
+            local send = C_ChatInfo and C_ChatInfo.SendAddonMessage or SendAddonMessage
+            pcall(send, ORDER_PREFIX, "assign list", "WHISPER", asker)
+        end
     else
         assignments = {}
         RefreshList()
@@ -522,7 +606,7 @@ end
 local function AssignTarget(marker, button)   -- marker 1..8; right-click clears the icon
     if not (UnitExists("target") and UnitIsPlayer("target") and not UnitIsUnit("target", "player")
             and UnitIsFriend("player", "target")) then
-        Print(T("target one of your bots first, then left-click an icon.")); SetStatus("|cffff4040" .. T("Target a bot first.") .. "|r")
+        Print("target one of your bots first, then left-click an icon."); SetStatus("|cffff4040" .. T("Target a bot first.") .. "|r")
         return
     end
     local name = SafeName("target")
@@ -569,7 +653,7 @@ local function ParseAssignLine(msg)
         end
         if printNextList then
             printNextList = false
-            if #assignments == 0 then Print(T("no assignments.")) end
+            if #assignments == 0 then Print("no assignments.") end
             for _, a in ipairs(assignments) do
                 Print(IconLabel(ICON_WORDS[a.marker + 1]) .. ": " .. a.name .. " (" .. T(a.role) .. ")")
             end
@@ -594,9 +678,7 @@ local function WhisperFilter(_, _, msg, author)
     -- /fb chat on: show the bot confirmations ("<Bot>: followed you") and distance replies in chat as well
     if ForeverBotsDB.showChat then return false end
     if ConfirmText(msg, author) then return true end
-    -- the silent re-send of the distance: the server answers "Follow distance N yards", on a Russian client "Дистанция следования: N ярд."
-    return Now() < distSilentUntil and type(msg) == "string" and
-        (strmatch(msg, "^Follow distance %d+ yards$") ~= nil or strmatch(msg, "^Дистанция следования: %d+ ярд%.$") ~= nil)
+    return Now() < distSilentUntil and type(msg) == "string" and strmatch(msg, "^Follow distance %d+ yards$") ~= nil
 end
 local function OwnListFilter(_, _, msg, author)
     if msg ~= "assign list" and not (Now() < distSilentUntil and type(msg) == "string" and strmatch(msg, "^distance %d+$")) then
@@ -654,11 +736,13 @@ local function RefreshOrderMacros()
         return
     end
     secureDirty = false
+    Step("secure order buttons")
     local word = OrderChannelWord()
     for _, b in ipairs(secureOrders) do
         b:SetAttribute("type", "macro")
         b:SetAttribute("macrotext", (b.macroPre or "") .. word .. b.orderText)
     end
+    Step("")
 end
 
 local function MakeSecureOrderButton(parent, text, width, order, height)
@@ -709,6 +793,47 @@ for _, k in ipairs(KEY_ORDERS) do
 end
 RefreshOrderMacros()
 
+------------------------------------------------------------------------------------------------------------- skin
+-- Own artwork in Textures\ (32-bit .tga, power-of-two sizes): wood body, bronze bead border, medallion, tabs. The buttons are the
+-- client's own red buttons (UIPanelButtonTemplate), so they look and behave like every other button in the game.
+local TEXDIR = "Interface\\AddOns\\" .. tostring(ADDON) .. "\\Textures\\"
+local FONT_LABEL = "Fonts\\FRIZQT__.TTF"
+local ROW_NORMAL, ROW_GOLD, ROW_BLUE, ROW_RED = 0, 4, 5, 6   -- resting look, chosen (kept highlighted), blue text, red text
+
+-- o.order: a secure order button (runs "/party <order>" or "/raid <order>", also in combat). Same template and font as the
+-- "Raid Info" button of the client's Raid window.
+local function MakeSkinButton(parent, text, w, h, o)
+    o = o or {}
+    local b = CreateFrame("Button", nil, parent, o.order and "UIPanelButtonTemplate,SecureActionButtonTemplate" or "UIPanelButtonTemplate")
+    b:SetSize(w, h)
+    b:SetText(T(text or ""))
+    local function Tint(self)
+        local fs = self.GetFontString and self:GetFontString()
+        if fs and self.fbTint then fs:SetTextColor(self.fbTint[1], self.fbTint[2], self.fbTint[3]) end
+    end
+    b:HookScript("OnEnter", Tint)
+    b:HookScript("OnLeave", Tint)
+    -- row: ROW_GOLD keeps the highlight lit (the chosen button), ROW_BLUE / ROW_RED tint the word
+    b.FBSetRow = function(self, row)
+        if row == ROW_GOLD then self:LockHighlight() else self:UnlockHighlight() end
+        if row == ROW_BLUE then self.fbTint = { 0.62, 0.8, 1 }
+        elseif row == ROW_RED then self.fbTint = { 1, 0.45, 0.35 }
+        else
+            self.fbTint = nil
+            local fs = self.GetFontString and self:GetFontString()
+            if fs then fs:SetTextColor(1, 0.82, 0) end
+        end
+        Tint(self)
+    end
+    if o.order then
+        b:RegisterForClicks("AnyUp", "AnyDown")
+        b.orderText = o.order
+        secureOrders[#secureOrders + 1] = b
+        RefreshOrderMacros()
+    end
+    return b
+end
+
 local function ClassColor(token)
     local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[token]
     if c then
@@ -747,38 +872,23 @@ local function AddBotWithGear(class, role)
     AddBot(class, role)
     if not sent and C_Timer and C_Timer.After then
         -- no group yet: the first bot makes one, so the gear word follows once it exists (it applies to the next bots)
-        C_Timer.After(2.5, function() SendGear() end)
+        C_Timer.After(2.5, function() Auto(SendGear) end)
     end
 end
 
-local addPanel, gearChips, gearLabel
-
+local gearBtn
 local function SetGearChoice(g)
     ForeverBotsDB.gear = g
-    for key, chip in pairs(gearChips or {}) do
-        if key == g then chip:Disable() else chip:Enable() end
-    end
-    if gearLabel then gearLabel:SetText(T("Now:") .. " |cffffd100" .. T(GEAR_NAME[g] or g) .. "|r") end
+    if gearBtn then gearBtn:SetText(T("Gear:") .. " " .. T(GEAR_NAME[g] and (g == "match" and "Match" or g == "best" and "Best" or g == "bis" and "BiS" or strupper(g)) or g)) end
     SendGear()
 end
 
--- The add-bots drop-down sits beside the main window, on the right or, near the screen edge, on the left.
-local function PlaceAddPanel()
-    if not (addPanel and frame) then return end
-    addPanel:ClearAllPoints()
-    local right, screen = frame:GetRight(), UIParent:GetRight()
-    if right and screen and right + addPanel:GetWidth() + 6 > screen then
-        addPanel:SetPoint("TOPRIGHT", frame, "TOPLEFT", 2, -6)
-    else
-        addPanel:SetPoint("TOPLEFT", frame, "TOPRIGHT", -2, -6)
+-- One click for a ready party: a tank, a healer and three damage dealers, added a moment apart so each reads the gear word.
+local QUICK_PARTY = { { "warrior", "tank" }, { "priest", "healer" }, { "mage", "dps" }, { "rogue", "dps" }, { "hunter", "dps" } }
+local function QuickParty()
+    for i, q in ipairs(QUICK_PARTY) do
+        AddBotWithGear(q[1], q[2])
     end
-end
-
-local addToggleBtn
-local function ShowAddPanel(show)
-    ForeverBotsDB.addOpen = show and true or false
-    if show then PlaceAddPanel(); addPanel:Show() else addPanel:Hide() end
-    if addToggleBtn then addToggleBtn:SetText(T(show and "Add bots  <" or "Add bots  >")) end
 end
 
 local function Tip(b, title, body)
@@ -804,25 +914,25 @@ end
 
 local function RaidReady()
     if InCombatLockdown and InCombatLockdown() then
-        Print(T("raid ready: not in combat."))
+        Print("raid ready: not in combat.")
         return
     end
     if not (C_Timer and C_Timer.After) then
-        Print(T("raid ready: this client has no timers; use /fb call all."))
+        Print("raid ready: this client has no timers; use /fb call all.")
         return
     end
     raidReadyRun = raidReadyRun + 1
     local run = raidReadyRun
     local function After(sec, fn)
         C_Timer.After(sec, function()
-            if run == raidReadyRun and not (InCombatLockdown and InCombatLockdown()) then fn() end
+            if run == raidReadyRun and not (InCombatLockdown and InCombatLockdown()) then Auto(fn) end
         end)
     end
     local function IsRaidNow() return IsInRaid and IsInRaid() end
 
     local function ReadyCheck()
         local ok = pcall(function() DoReadyCheck() end)
-        Print(T(ok and "raid ready: ready check sent." or "raid ready: done (only the leader can start a ready check)."))
+        Print(ok and "raid ready: ready check sent." or "raid ready: done (only the leader can start a ready check).")
     end
     local function Orders(n)
         GroupOrder("resume")
@@ -840,7 +950,7 @@ local function RaidReady()
     end
     local function Finish(n)
         if n <= 1 then
-            Print(T("raid ready: no bots joined. Save a group with /fb save all first."))
+            Print("raid ready: no bots joined. Save a group with /fb save all first.")
             return
         end
         if n > 5 and not IsRaidNow() then
@@ -859,7 +969,7 @@ local function RaidReady()
         Finish(MemberCount())
         return
     end
-    Print(T("raid ready: calling your saved bots..."))
+    Print("raid ready: calling your saved bots...")
     ServerCommand(".bot summon saved")
     local lastN, stable, waited = -1, 0, 0
     local function Poll()
@@ -871,249 +981,372 @@ local function RaidReady()
     After(2, Poll)
 end
 
-local function BuildFrame()
-    frame = CreateFrame("Frame", "ForeverBotsFrame", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
-    frame:SetSize(330, 10)
-    frame:SetPoint("CENTER")
-    frame:SetFrameStrata("DIALOG")
-    frame:SetMovable(true)
-    frame:EnableMouse(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local point, _, relPoint, x, y = self:GetPoint()
-        ForeverBotsDB.pos = { point, relPoint, x, y }
-        PlaceAddPanel()
-    end)
-    if frame.SetBackdrop then
-        frame:SetBackdrop({
+-- One table, not five locals: Lua 5.1 (the client's) allows a function only 60 upvalues, and BuildFrame is near that.
+local LAYOUT = {
+    W = 260,          -- 238 of content between 11 px margins
+    CONTENT = 238,
+    TOP = 70,
+    PANE_H = 250,     -- every tab is this tall: the window never changes size
+    FOOTER = 38,
+    TAB_STEP = 44,    -- side tabs down the right edge
+}
+local TAB_DEFS = { { "orders", "Orders" }, { "bots", "Bots" }, { "form", "Form" }, { "marks", "Marks" } }
+local frameTabs, framePanes = {}, {}
+local emptyFS, ordersGrid, footerFS
+local nativeFrame = false
+
+-- Window size: ForeverBotsDB.scale (0.7 to 1.5), 1.2 until set with /fb scale <n>.
+local SCALE_MIN, SCALE_MAX, SCALE_DEFAULT = 0.7, 1.5, 1.2
+local function WindowScale()
+    local n = tonumber(ForeverBotsDB.scale)
+    if not n then return SCALE_DEFAULT end
+    return math.max(SCALE_MIN, math.min(SCALE_MAX, n))
+end
+
+local function ShowTab(i)
+    i = (framePanes[i] and i) or 1
+    ForeverBotsDB.tab = i
+    for k, pane in ipairs(framePanes) do
+        if k == i then pane:Show() else pane:Hide() end
+        if frameTabs[k] then frameTabs[k]:SetChecked(k == i) end
+    end
+end
+
+local function UpdateEmpty()
+    if not (emptyFS and ordersGrid) then return end
+    local grouped = InGroupQuiet() and true or false
+    if grouped then emptyFS:Hide() else emptyFS:Show() end
+    ordersGrid:SetAlpha(grouped and 1 or 0.45)
+    if footerFS then footerFS:SetText((grouped and string.format(T("%d bots"), MemberCount() - 1) or T("No bots")) .. " - " .. T(StanceIsAggressive() and "Aggr." or "Passive")) end
+end
+
+-- The client's own window: the same portrait frame its Raid and Looking For Group windows use. If this client has no such
+-- template the window falls back to a plain dialog frame with the same contents.
+local function CreateWindow()
+    for _, tmpl in ipairs({ "PortraitFrameTemplate", "ButtonFrameTemplate" }) do
+        local ok, f = pcall(CreateFrame, "Frame", "ForeverBotsFrame", UIParent, tmpl)
+        if ok and f then return f, true end
+    end
+    local f = CreateFrame("Frame", "ForeverBotsFrame", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    if f.SetBackdrop then
+        f:SetBackdrop({
             bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
             edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
             tile = true, tileSize = 32, edgeSize = 24,
             insets = { left = 6, right = 6, top = 6, bottom = 6 },
         })
     end
-    if ForeverBotsDB.pos then
-        local p = ForeverBotsDB.pos
-        frame:ClearAllPoints()
-        frame:SetPoint(p[1], UIParent, p[2], p[3], p[4])
+    return f, false
+end
+
+local CLASS_ICON_TEX = "Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES"
+local ROLE_ATLAS = {
+    tank = { "UI-LFG-RoleIcon-Tank", "groupfinder-icon-role-large-tank" },
+    healer = { "UI-LFG-RoleIcon-Healer", "groupfinder-icon-role-large-heal" },
+    dps = { "UI-LFG-RoleIcon-DPS", "groupfinder-icon-role-large-dps" },
+}
+local ROLE_TEXCOORDS = { tank = { 0, 19 / 64, 22 / 64, 41 / 64 }, healer = { 20 / 64, 39 / 64, 1 / 64, 20 / 64 }, dps = { 20 / 64, 39 / 64, 22 / 64, 41 / 64 } }
+local ROLE_NAME = { tank = "Tank", healer = "Healer", dps = "Damage" }
+local function SetRoleTexture(tex, role)
+    for _, atlas in ipairs(ROLE_ATLAS[role]) do
+        local info = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas)
+        if info and pcall(tex.SetAtlas, tex, atlas) then return end
     end
+    tex:SetTexture("Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES")
+    local c = ROLE_TEXCOORDS[role]
+    tex:SetTexCoord(c[1], c[2], c[3], c[4])
+end
 
-    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", 0, -14)
-    title:SetText("WoW Forever Bots")
+local UI = {}   -- window builders as table functions: BuildFrame alone captured over 60 file-level locals, a Lua 5.1 compile error
+function UI.NewPane()
+    local pane = CreateFrame("Frame", nil, frame)
+    pane:SetSize(LAYOUT.CONTENT, LAYOUT.PANE_H)
+    pane:SetPoint("TOPLEFT", frame, "TOPLEFT", 11, -LAYOUT.TOP)
+    framePanes[#framePanes + 1] = pane
+    return pane
+end
+function UI.Section(pane, y, text)
+    local fs = pane:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    fs:SetPoint("TOPLEFT", pane, "TOPLEFT", 2, -y)
+    fs:SetText(T(text))
+    local d = pane:CreateTexture(nil, "ARTWORK")
+    d:SetTexture("Interface\\Buttons\\WHITE8X8")
+    d:SetVertexColor(0.55, 0.47, 0.25, 0.7)
+    d:SetSize(LAYOUT.CONTENT, 1)
+    d:SetPoint("TOPLEFT", pane, "TOPLEFT", 0, -(y + 17))
+end
+function UI.Btn(pane, x, y, w, h, text, o)
+    local b = MakeSkinButton(pane, text, w, h, o)
+    b:SetPoint("TOPLEFT", pane, "TOPLEFT", x, -y)
+    return b
+end
+function UI.Hint(pane, y, text)
+    local fs = pane:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    fs:SetPoint("TOPLEFT", pane, "TOPLEFT", 2, -y)
+    fs:SetText(T(text))
+    return fs
+end
 
-    local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", -4, -4)
+function UI.BuildOrders()
+    local Btn, Section, Hint, NewPane = UI.Btn, UI.Section, UI.Hint, UI.NewPane
+    ---------------------------------------------------------------------------------------------- orders
+    local orders = NewPane()
+    emptyFS = Hint(orders, 0, "|cffc8a050" .. T("No bots with you yet: see the Bots tab.") .. "|r")
+    ordersGrid = CreateFrame("Frame", nil, orders)
+    ordersGrid:SetAllPoints(orders)
+    local OG = {
+        -- word, order, tooltip title, tooltip text
+        { "Follow", "follow", "Follow", "Bots follow you and only defend. They do not advance or pull until you say Attack, Pull or Resume." },
+        { "Stay", "stay", "Stay", "Bots hold where they stand." },
+        { "Stop", "disengage", "Stop", "Bots stop attacking and go back to normal." },
+        { "Attack", "attack", "Attack", "Bots attack your target." },
+        { "Pull", "pull", "Pull", "Your tank bots open on your target; the rest join once it is engaged." },
+        { "Pull back", "pull back", "Pull back", "The main tank bot opens on your target from range, runs back to the rally point (or where it stood) and tanks it there, so nothing else aggros." },
+        { "Come", "come", "Come", "Bots teleport to you." },
+        { "Release", "release", "Release", "After a wipe: every dead bot releases, runs back to its corpse and rejoins you. Living bots ignore it." },
+        { "Fall back", "fallback", "Fall back", "Every bot drops the fight and runs to the rally point, then re-forms there. It fights only what follows until you say Attack, Pull or Resume." },
+    }
+    for i, d in ipairs(OG) do
+        local b = Btn(ordersGrid, ((i - 1) % 3) * 81, 18 + math.floor((i - 1) / 3) * 32, 76, 26, d[1], { order = d[2], size = 11 })
+        Tip(b, d[3], d[4])
+    end
+    local rally = Btn(ordersGrid, 0, 18 + 3 * 32, 76, 26, "Set rally", { order = "rally here", size = 11 })
+    Tip(rally, "Set rally", "Sets the rally point to where you stand (used by Fall back and Pull back).")
+    -- Stance: Passive (blue word) or Aggressive (red word), sent to the group on every pick and again to every bot that joins.
+    stanceBtn = Btn(ordersGrid, 81, 18 + 3 * 32, 157, 26, StanceLabel(), { size = 11 })
+    stanceBtn:SetScript("OnClick", function()
+        ForeverBotsDB.stance = StanceIsAggressive() and "passive" or "aggressive"
+        GroupOrder(ForeverBotsDB.stance)
+        RefreshStance()
+    end)
+    Tip(stanceBtn, "Stance", "Passive (the start setting): bots start nothing, fight only what you pull or what attacks the group, and come back to follow you. Aggressive: they also attack anything hostile within about 10 yards of you. Shows what you last sent; it is sent again to every bot that joins.")
+    RefreshStance()
 
-    ---------------------------------------------------------------------------------------------- header: add + switches
-    local y = -40
-    addToggleBtn = MakeButton(frame, "Add bots  >", 100, function() ShowAddPanel(not addPanel:IsShown()) end, 24)
-    addToggleBtn:SetPoint("TOPLEFT", 16, y)
-    Tip(addToggleBtn, "Add bots", "Opens a list beside this window: choose the gear, then click a class and role. The new bot joins you at your level.")
-
-    -- Two on/off switches. The icon shows the state last sent: coloured with a green ring = on, grey with a red ring = off.
-    -- Area spells: the bots use their area spells whenever they can (server: "aoe_all on|off", whispered to one of your
-    -- bots, which applies it to every bot in the group). Crowd control: on (the default) the bots crowd-control the mobs you
-    -- mark, off they leave them alone (group order "crowdcontrol on|off").
-    local sx = 128
-    local function Switch(key, default, texture, caption, title, onText, offText, send)
-        local b = CreateFrame("Button", nil, frame)
-        b:SetSize(24, 24)
-        b:SetPoint("TOPLEFT", sx, y)
-        local tex = b:CreateTexture(nil, "ARTWORK")
-        tex:SetAllPoints()
-        tex:SetTexture(texture)
-        local ring = b:CreateTexture(nil, "OVERLAY")
-        ring:SetPoint("TOPLEFT", -2, 2)
-        ring:SetPoint("BOTTOMRIGHT", 2, -2)
-        ring:SetTexture("Interface\\Buttons\\UI-Quickslot-Depress")
-        b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-        local cap = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        cap:SetPoint("LEFT", b, "RIGHT", 4, 0)
+    -- Two on/off check boxes at the bottom (the client's own check box). AoE: the bots use their area spells whenever they can
+    -- (server: "aoe_all on|off", whispered to one of your bots, which applies it to every bot in the group). Crowd control: on (the
+    -- default) the bots crowd-control the mobs you mark.
+    local function Switch(y, key, default, caption, onText, offText, send)
+        local cb = CreateFrame("CheckButton", nil, ordersGrid, "UICheckButtonTemplate")
+        cb:SetSize(26, 26)
+        cb:SetPoint("TOPLEFT", ordersGrid, "TOPLEFT", 0, -y)
+        local label = ordersGrid:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        label:SetPoint("LEFT", cb, "RIGHT", 2, 1)
+        label:SetText(T(caption))
         local function State()
             local on = ForeverBotsDB[key]
             if on == nil then on = default end
             return on
         end
-        local function Paint()
-            local on = State()
-            if tex.SetDesaturated then tex:SetDesaturated(not on) end
-            local c = on and 1 or 0.55
-            tex:SetVertexColor(c, c, c)
-            if on then ring:SetVertexColor(0.2, 1, 0.2) else ring:SetVertexColor(0.9, 0.2, 0.2) end
-            cap:SetText(T(caption) .. (on and (" |cff00ff00" .. T("on") .. "|r") or (" |cffff4040" .. T("off") .. "|r")))
-        end
-        Paint()
-        b:SetScript("OnClick", function()
-            ForeverBotsDB[key] = not State()
-            Paint()
+        cb:SetChecked(State())
+        cb:SetScript("OnClick", function(self)
+            ForeverBotsDB[key] = self:GetChecked() and true or false
             send(State())
-            if GameTooltip:IsOwned(b) then b:GetScript("OnEnter")(b) end
         end)
-        b:SetScript("OnEnter", function(self)
-            local on = State()
+        cb:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(T(title) .. ": " .. (on and ("|cff00ff00" .. T("ON") .. "|r") or ("|cffff4040" .. T("OFF") .. "|r")))
-            GameTooltip:AddLine(T(on and onText or offText), 1, 1, 1, true)
-            GameTooltip:AddLine(T("Click to switch."), 0.7, 0.7, 0.7)
+            GameTooltip:SetText(T(caption))
+            GameTooltip:AddLine(T(State() and onText or offText), 1, 1, 1, true)
             GameTooltip:Show()
         end)
-        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        sx = sx + 94
+        cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
-    Switch("aoe", false, "Interface\\Icons\\Spell_Shadow_RainOfFire", "AoE", "Area spells",
+    Switch(LAYOUT.PANE_H - 56, "aoe", false, "Use area spells freely",
         "The bots use their area spells whenever they can.",
         "The bots use area spells only when several mobs are close together.",
         function(on)
             local asker = ListAsker()
             if asker then SendChatMessage("aoe_all " .. (on and "on" or "off"), "WHISPER", nil, asker)
-            else Print(T("add a bot first: the area-spell setting goes to your group.")) end
+            else Print("add a bot first: the area-spell setting goes to your group.") end
         end)
-    Switch("cc", true, "Interface\\Icons\\Spell_Nature_Polymorph", "CC", "Crowd control",
-        "The bots crowd-control the mobs you mark (give a bot and a mob the same icon, see Assign a bot to an icon).",
+    Switch(LAYOUT.PANE_H - 28, "cc", true, "Crowd-control marked mobs",
+        "The bots crowd-control the mobs you mark (give a bot and a mob the same icon, see Marks).",
         "The bots leave marked mobs alone: no crowd control.",
         function(on) GroupOrder(on and "crowdcontrol on" or "crowdcontrol off") end)
-    y = y - 34
-    local raidReadyBtn = MakeButton(frame, "Raid ready", 298, RaidReady, 24)
-    raidReadyBtn:SetPoint("TOPLEFT", 16, y)
-    Tip(raidReadyBtn, "Raid ready", "Alone: calls your saved bots. Already in a group: uses that group and never changes it. Makes the group a raid if it needs one, sets the formation and spacing, and starts a ready check once the bots have buffed. Target your main tank first to set the Main Tank flag too. Not in combat.")
-    y = y - 32
+end
 
-    ---------------------------------------------------------------------------------------------- order rows
-    local function Header(text, hint)
-        local fs = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        fs:SetPoint("TOPLEFT", 16, y)
-        fs:SetText(T(text))
-        if hint then
-            local h = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            h:SetPoint("TOPLEFT", 16, y - 15)
-            h:SetText(T(hint))
-            y = y - 15
-        end
-        y = y - 19
-        return fs
+function UI.BuildBots()
+    local Btn, Section, Hint, NewPane = UI.Btn, UI.Section, UI.Hint, UI.NewPane
+    ---------------------------------------------------------------------------------------------- bots
+    local botsPane = NewPane()
+    Section(botsPane, 0, "Add a bot")
+    local faction = UnitFactionGroup("player")
+    local shown = {}
+    for _, class in ipairs(CLASSES) do
+        if not class.faction or class.faction == faction then shown[#shown + 1] = class end
     end
-    -- one row of { label, width, tooltip title, tooltip text, function }; each button keeps its own width
-    local function Row(defs)
-        local x = 16
-        local made = {}
-        for _, d in ipairs(defs) do
-            local b
-            if d[6] then
-                b = MakeSecureOrderButton(frame, d[1], d[2], d[6])
-            else
-                b = MakeButton(frame, d[1], d[2], function() d[5](b) end)
-            end
-            b:SetPoint("TOPLEFT", x, y)
-            if d[3] then Tip(b, d[3], d[4]) end
-            made[#made + 1] = b
-            x = x + d[2] + 3
-        end
-        y = y - 25
-        return made
+    local selFS = botsPane:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    selFS:SetPoint("TOPLEFT", botsPane, "TOPLEFT", 4, -68)
+    selFS:SetWidth(86)
+    selFS:SetJustifyH("LEFT")
+    selFS:SetWordWrap(false)
+    local roleBtns, classBtns, selected = {}, {}, 1
+    for i = 1, 3 do
+        local rb = CreateFrame("Button", nil, botsPane)
+        rb:SetSize(44, 44)
+        rb:SetPoint("TOPLEFT", botsPane, "TOPLEFT", 92 + (i - 1) * 52, -52)
+        local tex = rb:CreateTexture(nil, "ARTWORK")
+        tex:SetAllPoints()
+        rb.fbTex = tex
+        -- the small check box at the bottom left of the round icon, as in the Looking For Group window's role row
+        local check = CreateFrame("CheckButton", nil, rb, "UICheckButtonTemplate")
+        check:SetSize(22, 22)
+        check:SetPoint("BOTTOMLEFT", rb, "BOTTOMLEFT", -6, -8)
+        check:EnableMouse(false)
+        check:SetChecked(false)
+        rb.fbCheck = check
+        rb:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight", "ADD")
+        rb:SetScript("OnClick", function(self)
+            local class = shown[selected]
+            if not (class and self.fbRole) then return end
+            AddBotWithGear(class.key, self.fbRole)
+            check:SetChecked(true)
+            if C_Timer and C_Timer.After then C_Timer.After(0.8, function() check:SetChecked(false) end) end
+        end)
+        rb:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(string.format(T("Add a %s bot"), T(self.fbRole and ROLE_NAME[self.fbRole] or "")))
+            GameTooltip:AddLine(T("A new bot joins you at your level, wearing the gear chosen below."), 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        rb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        roleBtns[i] = rb
     end
+    local function SelectClass(i)
+        selected = i
+        local class = shown[i]
+        selFS:SetText(ClassColor(class.token) .. T(class.label) .. "|r")
+        for k, cb in ipairs(classBtns) do
+            if k == i then cb:LockHighlight() else cb:UnlockHighlight() end
+        end
+        for k, rb in ipairs(roleBtns) do
+            local role = class.roles[k]
+            rb.fbRole = role
+            if role then SetRoleTexture(rb.fbTex, role); rb:Show() else rb:Hide() end
+        end
+    end
+    local step = (LAYOUT.CONTENT - 24) / (#shown - 1)
+    for i, class in ipairs(shown) do
+        local cb = CreateFrame("Button", nil, botsPane)
+        cb:SetSize(24, 24)
+        cb:SetPoint("TOPLEFT", botsPane, "TOPLEFT", (i - 1) * step, -22)
+        local tex = cb:CreateTexture(nil, "ARTWORK")
+        tex:SetAllPoints()
+        local c = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class.token]
+        tex:SetTexture(CLASS_ICON_TEX)
+        if c then tex:SetTexCoord(c[1], c[2], c[3], c[4]) end
+        cb:SetHighlightTexture("Interface\\Buttons\\CheckButtonHilight", "ADD")
+        cb:SetScript("OnClick", function() SelectClass(i) end)
+        cb:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(ClassColor(class.token) .. T(class.label) .. "|r")
+            GameTooltip:AddLine(T("Pick the class, then a role below."), 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        classBtns[i] = cb
+    end
+    SelectClass(1)
+    local quick = Btn(botsPane, 0, 106, 117, 24, "Quick party", {})
+    quick:SetScript("OnClick", QuickParty)
+    Tip(quick, "Quick party", "Adds a tank, a healer and three damage dealers at your level.")
+    gearBtn = Btn(botsPane, 121, 106, 117, 24, "", {})
+    gearBtn:SetScript("OnClick", function()
+        local cur = ForeverBotsDB.gear or "match"
+        for i, g in ipairs(GEARS) do
+            if g[1] == cur then SetGearChoice(GEARS[i % #GEARS + 1][1]); break end
+        end
+        if GameTooltip:IsOwned(gearBtn) then gearBtn:GetScript("OnEnter")(gearBtn) end
+    end)
+    gearBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(string.format(T("Gear: %s"), T(GEAR_NAME[ForeverBotsDB.gear or "match"] or "?")))
+        GameTooltip:AddLine(T("The gear the next bots wear. Click to go to the next choice: Match, Best, BiS, T1, T2, T3."), 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    gearBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    SetGearChoice(GEAR_NAME[ForeverBotsDB.gear or ""] and ForeverBotsDB.gear or "match")
 
-    Header("Orders to the group", "Everything below goes to all your bots.")
-    -- Move and fight.
-    Row({
-        { "Follow", 72, "Follow", "Bots follow you and only defend. They do not advance or pull until you say Attack, Pull or Resume.", function() GroupOrder("follow") end, "follow" },
-        { "Stay",   72, "Stay", "Bots hold where they stand.", function() GroupOrder("stay") end, "stay" },
-        { "Attack", 72, "Attack", "Bots attack your target.", function() GroupOrder("attack") end, "attack" },
-        { "Resume", 72, "Resume", "Hand the fight back: bots go on with their normal play.", function() GroupOrder("resume") end, "resume" },
-    })
-    Row({
-        { "Pull",      72, "Pull", "Your tank bots open on your target; the rest join once it is engaged.", function() GroupOrder("pull") end, "pull" },
-        { "Pull back", 72, "Pull back", "The main tank bot opens on your target from range, runs back to the rally point (or where it stood) and tanks it there, so nothing else aggros.", function() GroupOrder("pull back") end, "pull back" },
-        { "Stop",      72, "Stop", "Bots stop attacking and go back to normal.", function() GroupOrder("disengage") end, "disengage" },
-        { "Flee",      72, "Flee", "Bots break off and run to you.", function() GroupOrder("flee") end, "flee" },
-    })
-    -- Stance toggle. Passive: the bots start nothing on their own and only defend themselves and the group until you say
-    -- Attack or Pull. Aggressive: they attack anything hostile within about 10 yards of you. The button shows the stance
-    -- it last sent (the bots start passive while you lead a dungeon group).
-    local stanceRow = Row({
-        { "Come", 72, "Come", "Bots teleport to you.", function() GroupOrder("come") end, "come" },
-        { StanceLabel(), 98, "Stance",
-          "Passive (the start setting): bots start nothing, fight only what you pull or what attacks the group, and come back to follow you. Aggressive: they also attack anything hostile within about 10 yards of you. Shows what you last sent; it is sent again to every bot that joins.",
-          function(self)
-              ForeverBotsDB.stance = StanceIsAggressive() and "passive" or "aggressive"
-              GroupOrder(ForeverBotsDB.stance)
-              self:SetText(StanceLabel())
-          end },
-    })
-    stanceBtn = stanceRow[2]
+    Section(botsPane, 142, "Your saved bots")
+    local SV = {
+        { "Save group", 0, 166, "Puts every bot with you on your saved list.", function() ServerCommand(".bot save all") end },
+        { "Unsave all", 1, 166, "Empties your saved list.", function() ServerCommand(".bot unsave all") end },
+        { "List", 0, 194, "Lists your bots in chat (saved ones are marked).", function() ServerCommand(".bot list") end },
+        { "Regear all", 1, 194, "Re-rolls the gear of your saved bots so they do not all wear the same pieces. Better pieces they already wear stay.", function() ServerCommand(".bot regear all") end },
+        { "Delete target", 0, 222, "Deletes the targeted bot's character for good (asks first).", DeleteTarget },
+    }
+    for _, d in ipairs(SV) do
+        local b = Btn(botsPane, d[2] * 121, d[3], 117, 24, d[1], {})
+        b:SetScript("OnClick", d[5])
+        Tip(b, d[1], d[4])
+    end
+end
 
-    y = y - 8
-    Header("After a wipe or to regroup")
-    Row({
-        -- Dead bots release their spirit and run back to their corpses; living ones ignore it.
-        { "Release",   96, "Release", "After a wipe: every dead bot releases, runs back to its corpse and rejoins you. Living bots ignore it.", function() GroupOrder("release") end, "release" },
-        -- Fall back: every bot drops the fight, runs to the rally point (set with Set rally, else where you stand) and
-        -- re-forms there; it fights only what follows until Attack, Pull or Resume.
-        { "Fall back", 96, "Fall back", "Every bot drops the fight and runs to the rally point, then re-forms there. It fights only what follows until you say Attack, Pull or Resume.", function() GroupOrder("fallback") end, "fallback" },
-        { "Set rally", 96, "Set rally", "Sets the rally point to where you stand (used by Fall back and Pull back).", function() GroupOrder("rally here") end, "rally here" },
-    })
-
-    y = y - 8
-    Header("Formation and spacing")
-    Row({
-        -- Formation round you out of combat (None = the plain follow behind you) and the spacing between bots.
-        { "Circle",   72, "Circle", "Out of combat the bots stand in a ring round you.", function() GroupOrder("formation circle") end, "formation circle" },
-        { "Arrow",    72, "Arrow", "Out of combat the bots form an arrow pointing the way you face.", function() GroupOrder("formation arrow") end, "formation arrow" },
-        { "Line",     72, "Line", "Out of combat the bots line up abreast behind you.", function() GroupOrder("formation line") end, "formation line" },
-        { "No form.", 72, "No formation", "The plain follow behind you.", function() GroupOrder("formation none") end, "formation none" },
-    })
-    Row({
-        { "Tight",  72, "Tight spacing", "About 2.5 yards between bots.", function() GroupOrder("spacing tight") end, "spacing tight" },
-        { "Close",  72, "Close spacing", "About 4 yards between bots (the default).", function() GroupOrder("spacing close") end, "spacing close" },
-        { "Spread", 72, "Spread spacing", "About 8 yards between bots.", function() GroupOrder("spacing spread") end, "spacing spread" },
-    })
-    -- Distance row: how far the bots follow you (and the formation spacing), stepped 1 yard per click.
-    local distLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    distLabel:SetPoint("TOPLEFT", 16, y - 4)
-    distLabel:SetText(T("Follow distance"))
-    local distMinus = MakeButton(frame, "-", 26, function() StepDistance(-1) end)
-    distMinus:SetPoint("TOPLEFT", 126, y)
-    distText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    distText:SetPoint("TOPLEFT", 156, y - 5)
-    distText:SetWidth(52)
+function UI.BuildForm()
+    local Btn, Section, Hint, NewPane = UI.Btn, UI.Section, UI.Hint, UI.NewPane
+    ---------------------------------------------------------------------------------------------- form
+    local formPane = NewPane()
+    local formBtns, spaceBtns = {}, {}
+    local function Lit(map, key)
+        for k, b in pairs(map) do b:FBSetRow(k == key and ROW_GOLD or ROW_NORMAL) end
+    end
+    Section(formPane, 0, "Shape")
+    local SH = {
+        { "circle", "Circle", "Out of combat the bots stand in a ring round you." },
+        { "arrow", "Arrow", "Out of combat the bots form an arrow pointing the way you face." },
+        { "line", "Line", "Out of combat the bots line up abreast behind you." },
+        { "none", "None", "The plain follow behind you." },
+    }
+    for i, d in ipairs(SH) do
+        local b = Btn(formPane, (i - 1) * 60, 24, 58, 24, d[2], { order = "formation " .. d[1], size = 11 })
+        b:HookScript("PostClick", function() ForeverBotsDB.form = d[1]; Lit(formBtns, d[1]) end)
+        Tip(b, d[2], d[3])
+        formBtns[d[1]] = b
+    end
+    Section(formPane, 62, "Spacing")
+    local SP = {
+        { "tight", "Tight", "About 2.5 yards between bots." },
+        { "close", "Close", "About 4 yards between bots (the default)." },
+        { "spread", "Spread", "About 8 yards between bots." },
+    }
+    for i, d in ipairs(SP) do
+        local b = Btn(formPane, (i - 1) * 81, 86, 76, 24, d[2], { order = "spacing " .. d[1], size = 11 })
+        b:HookScript("PostClick", function() ForeverBotsDB.space = d[1]; Lit(spaceBtns, d[1]) end)
+        Tip(b, d[2] .. " spacing", d[3])
+        spaceBtns[d[1]] = b
+    end
+    Lit(formBtns, ForeverBotsDB.form)
+    Lit(spaceBtns, ForeverBotsDB.space)
+    Section(formPane, 124, "Follow distance")
+    local distMinus = Btn(formPane, 70, 148, 28, 24, "-", { size = 13 })
+    distMinus:SetScript("OnClick", function() StepDistance(-1) end)
+    distText = formPane:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    distText:SetPoint("TOP", formPane, "TOPLEFT", LAYOUT.CONTENT / 2, -153)
+    distText:SetWidth(60)
     distText:SetJustifyH("CENTER")
-    local distPlus = MakeButton(frame, "+", 26, function() StepDistance(1) end)
-    distPlus:SetPoint("TOPLEFT", 212, y)
+    local distPlus = Btn(formPane, 140, 148, 28, 24, "+", { size = 13 })
+    distPlus:SetScript("OnClick", function() StepDistance(1) end)
     Tip(distMinus, "Follow distance", "How far the bots follow you out of combat, 2 to 20 yards. Also sets the formation spacing.")
     Tip(distPlus, "Follow distance", "How far the bots follow you out of combat, 2 to 20 yards. Also sets the formation spacing.")
     ShowDistance()
-    y = y - 30
+end
 
-    y = y - 4
-    Header("Tanks and markers")
-    Row({
-        -- Sets the raid's Main Tank flag on your current target (a raid group member).
-        { "Make main tank", 96, "Make main tank", "Sets the raid Main Tank flag on the raid member you target. Raid groups only.", function() GroupOrder("set main tank") end },
-        -- Tank markers: the tank bot you target takes the mob carrying the chosen raid marker (the main tank's pull is
-        -- marked skull and the off tanks' mobs the next markers on their own; this overrides that). The marker button
-        -- cycles skull, cross, star, circle, diamond, triangle, moon, square.
-        { T("Marker:") .. " " .. IconLabel(TANK_MARKERS[tankMarker]), 96, "Marker", "Click to cycle the marker (skull, cross, star, circle, diamond, triangle, moon, square) the next button hands out.", function(self)
-            tankMarker = tankMarker % #TANK_MARKERS + 1
-            self:SetText(T("Marker:") .. " " .. IconLabel(TANK_MARKERS[tankMarker]))
-        end },
-        { "Give to tank", 96, "Give marker to tank", "The tank bot you target holds whichever mob carries this marker (mark the mob yourself with the raid icons).", function() GroupOrder("tank target " .. TANK_MARKERS[tankMarker]) end },
-    })
-    Row({
-        { "Clear tanks", 96, "Clear tanks", "Back to the automatic tank split.", function() GroupOrder("clear tanks") end },
-    })
-
-    y = y - 8
-    Header("Assign a bot to an icon", "Target a bot, left-click an icon. Right-click clears it.")
-    statusFS = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+function UI.BuildMarks()
+    local Btn, Section, Hint, NewPane = UI.Btn, UI.Section, UI.Hint, UI.NewPane
+    ---------------------------------------------------------------------------------------------- marks
+    local marksPane = NewPane()
+    Section(marksPane, 0, "Assign a bot to an icon")
+    Hint(marksPane, 24, "Target a bot, then click an icon.")
+    statusFS = marksPane:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     for i = 1, 8 do
-        local ib = CreateFrame("Button", nil, frame)
-        ib:SetSize(30, 30)
-        ib:SetPoint("TOPLEFT", 16 + (i - 1) * 37, y)
+        local ib = CreateFrame("Button", nil, marksPane)
+        ib:SetSize(28, 28)
+        ib:SetPoint("TOPLEFT", marksPane, "TOPLEFT", (i - 1) * 30, -40)
         local tex = ib:CreateTexture(nil, "ARTWORK")
-        tex:SetAllPoints()
+        tex:SetPoint("TOPLEFT", 3, -3)
+        tex:SetPoint("BOTTOMRIGHT", -3, 3)
         tex:SetTexture(ICON_TEX .. i)
+        ib:SetNormalTexture("Interface\\Buttons\\UI-Quickslot2")
+        ib:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
         ib:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
         ib:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         ib:SetScript("OnClick", function(_, button) AssignTarget(i, button) end)
@@ -1126,108 +1359,185 @@ local function BuildFrame()
         end)
         ib:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
-    y = y - 34
     local roleBtn
-    roleBtn = MakeButton(frame, RoleText("auto"), 98, function()
+    roleBtn = Btn(marksPane, 0, 76, 76, 24, RoleText("auto"), {})
+    roleBtn:SetScript("OnClick", function()
         roleChoice = roleChoice % #ROLE_CYCLE + 1
         roleBtn:SetText(RoleText(ROLE_CYCLE[roleChoice]))
     end)
-    roleBtn:SetPoint("TOPLEFT", 16, y)
     Tip(roleBtn, "Role", "auto: a tank bot tanks the mob with that icon, casters crowd-control it until a skull goes on, the rest kill it first. Click to force tank, cc or kill for the next assignment.")
-    local clearAll = MakeButton(frame, "Clear all", 98, function()
+    local clearAll = Btn(marksPane, 81, 76, 76, 24, "Clear all", {})
+    clearAll:SetScript("OnClick", function()
         GroupOrder("assign clear")
         lastAssign = nil
         SetStatus("|cffffff00" .. T("Cleared all, asking the server...") .. "|r")
         RequestListSoon()
     end)
-    clearAll:SetPoint("TOPLEFT", 117, y)
-    local refreshBtn = MakeButton(frame, "Refresh", 98, RequestList)
-    refreshBtn:SetPoint("TOPLEFT", 218, y)
-    y = y - 26
-    statusFS:SetPoint("TOPLEFT", 20, y)
+    Tip(clearAll, "Clear all", "Removes every icon assignment. Right-click an icon to clear just that one.")
+    local refreshBtn = Btn(marksPane, 162, 76, 76, 24, "Refresh", {})
+    refreshBtn:SetScript("OnClick", RequestList)
+    statusFS:SetPoint("TOPLEFT", marksPane, "TOPLEFT", 4, -106)
+    statusFS:SetWidth(LAYOUT.CONTENT - 8)
     statusFS:SetJustifyH("LEFT")
-    y = y - 16
     for i = 1, MAX_LIST do
-        local fs = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        fs:SetPoint("TOPLEFT", 20, y)
+        local fs = marksPane:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("TOPLEFT", marksPane, "TOPLEFT", 4, -120 - (i - 1) * 12)
+        fs:SetWidth(LAYOUT.CONTENT - 8)
         fs:SetJustifyH("LEFT")
+        fs:SetWordWrap(false)
         listLines[i] = fs
-        if i < MAX_LIST then y = y - 15 end
     end
     RefreshList()
+
+    Section(marksPane, 180, "Tanks")
+    local markerBtn
+    local mt = Btn(marksPane, 0, 202, 117, 22, "Main tank", {})
+    mt:SetScript("OnClick", function() GroupOrder("set main tank") end)
+    Tip(mt, "Make main tank", "Sets the raid Main Tank flag on the raid member you target. Raid groups only.")
+    markerBtn = Btn(marksPane, 121, 202, 117, 22, T("Mark:") .. " " .. IconLabel(TANK_MARKERS[tankMarker]), {})
+    markerBtn:SetScript("OnClick", function(self)
+        tankMarker = tankMarker % #TANK_MARKERS + 1
+        self:SetText(T("Mark:") .. " " .. IconLabel(TANK_MARKERS[tankMarker]))
+    end)
+    Tip(markerBtn, "Marker", "Click to cycle the marker (skull, cross, star, circle, diamond, triangle, moon, square) the next button hands out.")
+    local give = Btn(marksPane, 0, 226, 117, 22, "Give to tank", {})
+    give:SetScript("OnClick", function() GroupOrder("tank target " .. TANK_MARKERS[tankMarker]) end)
+    Tip(give, "Give marker to tank", "The tank bot you target holds whichever mob carries this marker (mark the mob yourself with the raid icons).")
+    local clearTanks = Btn(marksPane, 121, 226, 117, 22, "Clear tanks", {})
+    clearTanks:SetScript("OnClick", function() GroupOrder("clear tanks") end)
+    Tip(clearTanks, "Clear tanks", "Back to the automatic tank split.")
+end
+
+function UI.BuildFooter()
+    ---------------------------------------------------------------------------------------------- footer
+    -- group and stance on the left (one line, never wrapped), two quick buttons on the right; the text has its own room.
+    footerFS = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    footerFS:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 14, 17)
+    footerFS:SetWidth(92)
+    footerFS:SetJustifyH("LEFT")
+    footerFS:SetWordWrap(false)
+    local fCall = MakeSkinButton(frame, "Call saved", 72, 22, {})
+    fCall:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -88, 12)
+    fCall:SetScript("OnClick", function() ServerCommand(".bot summon saved") end)
+    Tip(fCall, "Call saved", "Brings your saved bots, and every bot in your group, to you.")
+    local fDismiss = MakeSkinButton(frame, "Dismiss all", 74, 22, {})
+    fDismiss:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 12)
+    fDismiss:SetScript("OnClick", function() ServerCommand(".bot dismiss all") end)
+    Tip(fDismiss, "Dismiss all", "Sends all your bots away.")
+end
+
+function UI.BuildTabs()
+    ---------------------------------------------------------------------------------------------- side tabs
+    -- Square icon tabs down the right edge of the window, built like the spell book's side tabs (its tab border art, a client
+    -- icon, the same check highlight), each with a tooltip naming the page.
+    local TAB_ICON = {
+        orders = "Interface\\Icons\\Ability_Warrior_BattleShout",
+        bots = "Interface\\Icons\\INV_Misc_GroupNeedMore",
+        form = "Interface\\Icons\\INV_Misc_Map_01",
+        marks = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_8",
+    }
+    for i, def in ipairs(TAB_DEFS) do
+        local t = CreateFrame("CheckButton", nil, frame)
+        t:SetSize(32, 32)
+        t:SetPoint("TOPLEFT", frame, "TOPRIGHT", -1, -(36 + (i - 1) * LAYOUT.TAB_STEP))
+        local border = t:CreateTexture(nil, "BACKGROUND")
+        border:SetTexture("Interface\\SpellBook\\SpellBook-SkillLineTab")
+        border:SetSize(64, 64)
+        border:SetPoint("TOPLEFT", -3, 11)
+        local icon = t:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints()
+        icon:SetTexture(TAB_ICON[def[1]])
+        if def[1] == "bots" then SetRoleTexture(icon, "tank") end   -- the Add a bot row's shield, known to render here
+        if not icon:GetTexture() then icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
+        t.fbIcon = icon
+        t:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+        t:SetCheckedTexture("Interface\\Buttons\\CheckButtonHilight")
+        -- SetCheckedTexture takes no blend mode (only SetHighlightTexture does): without ADD the checked square is drawn opaque,
+        -- which blacked out whichever tab was selected
+        local ct = t:GetCheckedTexture()
+        if ct and ct.SetBlendMode then ct:SetBlendMode("ADD") end
+        t:SetScript("OnClick", function() ShowTab(i) end)
+        t:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(T(def[2]))
+            GameTooltip:Show()
+        end)
+        t:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        frameTabs[i] = t
+    end
+end
+
+local function BuildFrame()
+    local native
+    frame, native = CreateWindow()
+    nativeFrame = native
+    frame:SetSize(LAYOUT.W, LAYOUT.TOP + LAYOUT.PANE_H + LAYOUT.FOOTER)
+    frame:SetScale(WindowScale())
+    frame:SetPoint("CENTER")
+    frame:SetFrameStrata("DIALOG")
+    frame:SetMovable(true)
+    frame:SetClampedToScreen(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local point, _, relPoint, x, y = self:GetPoint()
+        ForeverBotsDB.pos = { point, relPoint, x, y }
+    end)
+    if ForeverBotsDB.pos then
+        local p = ForeverBotsDB.pos
+        frame:ClearAllPoints()
+        frame:SetPoint(p[1], UIParent, p[2], p[3], p[4])
+    end
+
+    -- title bar: the template's own centred title and portrait slot (a small group icon), its own close button
+    local titled = false
+    if native and frame.SetTitle then titled = pcall(frame.SetTitle, frame, "WoW Forever Bots") end
+    if native and frame.SetPortraitToAsset then pcall(frame.SetPortraitToAsset, frame, "Interface\\Icons\\INV_Misc_GroupNeedMore") end
+    if not titled then
+        local t = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        t:SetPoint("TOP", frame, "TOP", 0, -10)
+        t:SetText("WoW Forever Bots")
+    end
+    if not (native and frame.CloseButton) then
+        local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT", 2, 2)
+    end
+
+    -- dark inner panel under the contents, as in the client's own windows
+    local inset = frame.Inset
+    if not inset then
+        local okI, f = pcall(CreateFrame, "Frame", nil, frame, "InsetFrameTemplate")
+        if okI then inset = f end
+    end
+    if inset then
+        inset:ClearAllPoints()
+        inset:SetPoint("TOPLEFT", frame, "TOPLEFT", 6, -26)
+        inset:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -6, 6)
+    end
+
+    local raidReadyBtn = MakeSkinButton(frame, "Raid ready", LAYOUT.CONTENT, 24, {})
+    raidReadyBtn:SetScript("OnClick", RaidReady)
+    raidReadyBtn:SetPoint("TOPLEFT", 11, -36)
+    Tip(raidReadyBtn, "Raid ready", "Alone: calls your saved bots. Already in a group: uses that group and never changes it. Makes the group a raid if it needs one, sets the formation and spacing, and starts a ready check once the bots have buffed. Target your main tank first to set the Main Tank flag too. Not in combat.")
+
+    UI.BuildOrders()
+    UI.BuildBots()
+    UI.BuildForm()
+    UI.BuildMarks()
+    UI.BuildFooter()
+    UI.BuildTabs()
+
     frame:SetScript("OnUpdate", function(self, elapsed)
         self.fbTick = (self.fbTick or 0) + elapsed
+        self.fbSlow = (self.fbSlow or 0) + elapsed
         if self.fbTick >= 30 then self.fbTick = 0; RequestList() end
+        if self.fbSlow >= 0.5 then self.fbSlow = 0; UpdateEmpty() end
     end)
 
-    y = y - 30
-    Header("Your bots", "The bots you keep between sessions.")
-    Row({
-        { "Call saved",  98, "Call saved", "Brings your saved bots, and every bot in your group, to you.", function() ServerCommand(".bot summon saved") end },
-        { "Save group",  98, "Save group", "Puts every bot with you on your saved list.", function() ServerCommand(".bot save all") end },
-        { "Dismiss all", 98, "Dismiss all", "Sends all your bots away.", function() ServerCommand(".bot dismiss all") end },
-    })
-    Row({
-        { "Unsave all",    98, "Unsave all", "Empties your saved list.", function() ServerCommand(".bot unsave all") end },
-        { "Delete target", 98, "Delete target", "Deletes the targeted bot's character for good (asks first).", DeleteTarget },
-        { "List",          98, "List", "Lists your bots in chat (saved ones are marked).", function() ServerCommand(".bot list") end },
-    })
-    Row({
-        { "Regear all", 98, "Regear all", "Re-rolls the gear of your saved bots so they do not all wear the same pieces. Better pieces they already wear stay.", function() ServerCommand(".bot regear all") end },
-    })
-
-    frame:SetHeight(-y + 22)
-
-    ---------------------------------------------------------------------------------------------- add-bots drop-down
-    addPanel = CreateFrame("Frame", nil, frame, BackdropTemplateMixin and "BackdropTemplate" or nil)
-    addPanel:SetSize(RU_CLIENT and 292 or 262, 10)
-    addPanel:SetFrameStrata("DIALOG")
-    addPanel:EnableMouse(true)
-    if addPanel.SetBackdrop then
-        addPanel:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile = true, tileSize = 32, edgeSize = 16,
-            insets = { left = 4, right = 4, top = 4, bottom = 4 },
-        })
-    end
-    local gTitle = addPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    gTitle:SetPoint("TOPLEFT", 14, -14)
-    gTitle:SetText(T("Select gear"))
-    gearChips = {}
-    for i, g in ipairs(GEARS) do
-        local chip = MakeButton(addPanel, g[2], 52, function() SetGearChoice(g[1]) end, 20)
-        chip:SetPoint("TOPLEFT", 14 + ((i - 1) % 3) * 56, -32 - math.floor((i - 1) / 3) * 22)
-        Tip(chip, GEAR_NAME[g[1]], "Gear for the bots you add next.")
-        gearChips[g[1]] = chip
-    end
-    gearLabel = addPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    gearLabel:SetPoint("TOPLEFT", 14, -80)
-    local aTitle = addPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    aTitle:SetPoint("TOPLEFT", 14, -102)
-    aTitle:SetText(T("Add a bot"))
-    local faction = UnitFactionGroup("player")
-    local ay = -120
-    for _, class in ipairs(CLASSES) do
-        if not class.faction or class.faction == faction then
-            local name = addPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            name:SetPoint("TOPLEFT", 14, ay - 4)
-            name:SetText(ClassColor(class.token) .. T(class.label) .. "|r")
-            local bx = RU_CLIENT and 108 or 78
-            for _, role in ipairs(class.roles) do
-                local b = MakeButton(addPanel, ROLE_LABEL[role], 54, function() AddBotWithGear(class.key, role) end)
-                b:SetPoint("TOPLEFT", bx, ay)
-                bx = bx + 57
-            end
-            ay = ay - 24
-        end
-    end
-    local aHint = addPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    aHint:SetPoint("TOPLEFT", 14, ay - 4)
-    aHint:SetText(T("A new bot joins you at your level."))
-    addPanel:SetHeight(-ay + 28)
-    addPanel:Hide()
-    SetGearChoice(GEAR_NAME[ForeverBotsDB.gear or ""] and ForeverBotsDB.gear or "match")
+    ShowTab(ForeverBotsDB.tab or 1)
+    UpdateEmpty()
 
     frame:Hide()
     -- Deliberately NOT in UISpecialFrames: Escape and "close all windows" must not close the panel.
@@ -1236,7 +1546,7 @@ local function BuildFrame()
         ForeverBotsDB.open = true
         self.fbTick = 0
         RequestList()
-        ShowAddPanel(ForeverBotsDB.addOpen)
+        UpdateEmpty()
     end)
     frame:SetScript("OnHide", function() ForeverBotsDB.open = false end)
 end
@@ -1256,11 +1566,11 @@ distFrame:SetScript("OnUpdate", function(self, elapsed)
     self.acc = 0
     local now = Now()
     if distDirtyAt and now - distDirtyAt >= 0.4 and now - distLastSend >= 0.3 then
-        SendDistance(false)
+        Auto(SendDistance, false)
     end
     if self.groupAt and now >= self.groupAt then
         self.groupAt = nil
-        SendDistance(true)
+        Auto(SendDistance, true)
     end
     if self.stanceAt and now >= self.stanceAt then
         self.stanceAt = nil
@@ -1268,7 +1578,7 @@ distFrame:SetScript("OnUpdate", function(self, elapsed)
         -- (new and re-created bots included); a never-picked stance is sent only inside an instance, where Passive is the default.
         local okI, inInstance = pcall(IsInInstance)
         if GroupSize() > 0 and (ForeverBotsDB.stance or (okI and inInstance)) then
-            GroupOrder(StanceIsAggressive() and "aggressive" or "passive")
+            Auto(GroupOrder, StanceIsAggressive() and "aggressive" or "passive")
         end
         RefreshStance()
     end
@@ -1306,12 +1616,128 @@ end
 
 function ForeverBots_ToggleWindow() Toggle() end
 
+------------------------------------------------------------------------------------------------------------- minimap button
+-- The FB button on the minimap ring: left-click opens the window, right-click a short menu, drag moves it round the ring.
+-- ForeverBotsDB.minimap = { angle = degrees, hidden = bool }; /fb minimap brings it back after "Hide this button".
+local mmButton, mmMenu
+local atan2 = math.atan2 or math.atan
+
+local function MinimapPlace()
+    if not (mmButton and Minimap) then return end
+    local a = math.rad(ForeverBotsDB.minimap.angle or 215)
+    local r = (Minimap:GetWidth() / 2) + 5
+    mmButton:ClearAllPoints()
+    mmButton:SetPoint("CENTER", Minimap, "CENTER", math.cos(a) * r, math.sin(a) * r)
+end
+
+local function MinimapDrag()
+    local cx, cy = Minimap:GetCenter()
+    local mx, my = GetCursorPosition()
+    local scale = Minimap:GetEffectiveScale()
+    ForeverBotsDB.minimap.angle = math.deg(atan2(my / scale - cy, mx / scale - cx))
+    MinimapPlace()
+end
+
+local function ToggleMinimapMenu()
+    if not mmMenu then
+        local m = CreateFrame("Frame", "ForeverBotsMinimapMenu", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+        mmMenu = m
+        m:SetSize(150, 4 * 28 + 12)
+        m:SetFrameStrata("DIALOG")
+        m:EnableMouse(true)
+        if m.SetBackdrop then
+            m:SetBackdrop({
+                bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+                tile = true, tileSize = 32, edgeSize = 16,
+                insets = { left = 4, right = 4, top = 4, bottom = 4 },
+            })
+        end
+        local items = {
+            { "Raid ready", RaidReady },
+            { "Call saved bots", function() ServerCommand(".bot summon saved") end },
+            { "Dismiss all bots", function() ServerCommand(".bot dismiss all") end },
+            { "Hide this button", function()
+                ForeverBotsDB.minimap.hidden = true
+                mmButton:Hide()
+                Print("minimap button hidden: /fb minimap brings it back.")
+            end },
+        }
+        for i, it in ipairs(items) do
+            local b = MakeSkinButton(m, it[1], 138, 24, { size = 12 })
+            b:SetPoint("TOPLEFT", 6, -6 - (i - 1) * 28)
+            b:SetScript("OnClick", function() m:Hide(); it[2]() end)
+        end
+        m:SetScript("OnUpdate", function(self, elapsed)
+            -- (the global MouseIsOver no longer exists on this client: "attempt to call a nil value" every frame)
+            if self:IsMouseOver() or mmButton:IsMouseOver() then self.away = 0 else self.away = (self.away or 0) + elapsed end
+            if self.away > 1.5 then self:Hide() end
+        end)
+        m:Hide()
+    end
+    if mmMenu:IsShown() then mmMenu:Hide(); return end
+    mmMenu:ClearAllPoints()
+    local x = mmButton:GetCenter()
+    if x and x > UIParent:GetWidth() / 2 then
+        mmMenu:SetPoint("TOPRIGHT", mmButton, "BOTTOMRIGHT", 0, -2)
+    else
+        mmMenu:SetPoint("TOPLEFT", mmButton, "BOTTOMLEFT", 0, -2)
+    end
+    mmMenu.away = 0
+    mmMenu:Show()
+end
+
+local function BuildMinimapButton()
+    Step("minimap button")
+    ForeverBotsDB.minimap = ForeverBotsDB.minimap or {}
+    if mmButton or not Minimap then return end
+    local b = CreateFrame("Button", "ForeverBotsMinimapButton", Minimap)
+    mmButton = b
+    b:SetSize(31, 31)
+    b:SetFrameStrata("MEDIUM")
+    b:SetFrameLevel(8)
+    b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    b:RegisterForDrag("LeftButton")
+    local icon = b:CreateTexture(nil, "BACKGROUND")
+    icon:SetTexture(TEXDIR .. "mono_fb64")
+    icon:SetSize(20, 20)
+    icon:SetPoint("TOPLEFT", 6, -5)
+    local border = b:CreateTexture(nil, "OVERLAY")
+    border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+    border:SetSize(53, 53)
+    border:SetPoint("TOPLEFT")
+    b:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+    b:SetScript("OnClick", function(_, button)
+        if button == "RightButton" then ToggleMinimapMenu() else Toggle() end
+    end)
+    b:SetScript("OnDragStart", function(self) self:SetScript("OnUpdate", MinimapDrag) end)
+    b:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
+    b:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:SetText("WoW Forever Bots")
+        GameTooltip:AddLine(T("Click: open or close the bot window"), 1, 1, 1)
+        GameTooltip:AddLine(T("Right-click: raid ready, call, dismiss"), 1, 1, 1)
+        GameTooltip:AddLine(T("Drag: move this button"), 0.7, 0.7, 0.7)
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    MinimapPlace()
+    if ForeverBotsDB.minimap.hidden then b:Hide() end
+    Step("")
+end
+
+local function SetMinimapShown(show)
+    BuildMinimapButton()
+    if not mmButton then return end
+    ForeverBotsDB.minimap.hidden = not show
+    if show then mmButton:Show() else mmButton:Hide() end
+end
+
 function ForeverBots_ToggleStance()
     if not ForeverBotsDB then return end
     ForeverBotsDB.stance = StanceIsAggressive() and "passive" or "aggressive"
     GroupOrder(ForeverBotsDB.stance)
     RefreshStance()
-    Print(T("stance:") .. " " .. StanceLabel())
+    Print(T("stance:") .. " " .. T(StanceLabel()))
 end
 
 ------------------------------------------------------------------------------------------------------------- bot panel
@@ -1370,7 +1796,14 @@ end
 
 local function BotWhisper(text)
     if not botName then return end
-    SendChatMessage(text, "WHISPER", nil, botName)
+    if inAuto then
+        -- from the panel's timer (the coalesced distance order): an addon whisper, a chat whisper would be blocked
+        if not prefixOk then return end
+        local send = C_ChatInfo and C_ChatInfo.SendAddonMessage or SendAddonMessage
+        pcall(send, ORDER_PREFIX, text, "WHISPER", botName)
+    else
+        SendChatMessage(text, "WHISPER", nil, botName)
+    end
     botSentAt = Now()
     SetBotStatus("|cffffff00" .. text .. " ...|r")
 end
@@ -1517,7 +1950,7 @@ local function BuildBotPanel()
         local now = Now()
         if botDistDirtyAt and now - botDistDirtyAt >= 0.4 and botName then
             botDistDirtyAt = nil
-            BotWhisper("distance " .. botDist)
+            Auto(BotWhisper, "distance " .. botDist)
         end
         if botSentAt and now - botSentAt > 4 then
             botSentAt = nil
@@ -1581,6 +2014,7 @@ end
 -- (2026-10-15), so the hooks are gone. The portrait menu's "Whisper (Forever Bots)" and typed /w are the supported ways.
 
 local function AddPopupEntry()
+    Step("portrait menu entries")
     if not (Menu and Menu.ModifyMenu) then return end
     -- /fb menu off (then /reload) leaves the client's unit menus completely untouched: a menu we modified can taint the client's
     -- own menu actions ("ForeverBots has been blocked from an action only available to the Blizzard UI", reported 2026-10-15).
@@ -1594,6 +2028,7 @@ local function AddPopupEntry()
     -- non-secret one, a unit that is not an enemy, and the whole callback runs under pcall: nothing is added for an enemy or
     -- a unit whose name or token is secret (combat, battleground).
     local function modify(_, root, ctx)
+        Step("portrait menu")
         local ok = pcall(function()
             if type(ctx) ~= "table" then return end
             local name, unit = ctx.name, ctx.unit
@@ -1678,7 +2113,7 @@ do
         local name, text = strmatch(msg, "^%s*(%S+)%s+(.-)%s*$")
         if not name then name = strmatch(msg, "^%s*(%S+)%s*$"); text = nil end
         if not name then
-            Print(T("/w <name> <message> whispers a player"))
+            Print("/w <name> <message> whispers a player")
             return
         end
         name = strtrim((strsplit("-", name)))   -- "Name-Realm" -> "Name": a single realm
@@ -1714,16 +2149,20 @@ do
     local seen = {}   -- [editbox] = { text = last non-empty text, at = time }
     local function HookBox(box)
         if not (box and box.HookScript) then return end
+        -- All three hooks do nothing outside a battleground: the secure order buttons run their "/party ..." line through this same
+        -- edit box, so our code stays out of that path everywhere the bg-whisper workaround is not needed.
         pcall(box.HookScript, box, "OnTextChanged", function(self)
+            if not InPvP() then return end
             local ok, text = pcall(self.GetText, self)
             text = ok and SafeStr(text) or nil
             if text and text ~= "" then seen[self] = { text = text, at = GetTime() } end
         end)
-        pcall(box.HookScript, box, "OnEscapePressed", function(self) seen[self] = nil end)
+        pcall(box.HookScript, box, "OnEscapePressed", function(self) if InPvP() then seen[self] = nil end end)
         pcall(box.HookScript, box, "OnEnterPressed", function(self)
+            if not InPvP() then return end
             local rec = seen[self]
             seen[self] = nil
-            if not rec or GetTime() - rec.at > 30 or not InPvP() then return end
+            if not rec or GetTime() - rec.at > 30 then return end
             local name, text = strmatch(rec.text, "^/[cC][wW]%s+(%S+)%s+(.-)%s*$")
             if not name or text == "" then return end
             name = strtrim((strsplit("-", name)))
@@ -1751,11 +2190,35 @@ SlashCmdList.FOREVERBOTS = function(msg)
         Print(string.format(T("bot confirmations in chat: %s  (/fb chat on|off)"), T(ForeverBotsDB.showChat and "shown" or "hidden (shown in the Bots panel status line)")))
         return
     end
+    if verb == "minimap" then
+        if class == "reset" then ForeverBotsDB.minimap = { angle = 215 }; BuildMinimapButton(); MinimapPlace(); SetMinimapShown(true)
+        elseif class == "off" then SetMinimapShown(false)
+        elseif class == "on" then SetMinimapShown(true)
+        else SetMinimapShown(ForeverBotsDB.minimap == nil or ForeverBotsDB.minimap.hidden == true) end
+        Print((ForeverBotsDB.minimap and ForeverBotsDB.minimap.hidden) and "minimap button: hidden  (/fb minimap on|off|reset)"
+            or "minimap button: shown  (/fb minimap on|off|reset)")
+        return
+    end
+    if verb == "scale" then
+        local n = tonumber(class)
+        if n then
+            ForeverBotsDB.scale = math.max(SCALE_MIN, math.min(SCALE_MAX, n))
+            if frame then frame:SetScale(WindowScale()) end
+        end
+        Print(string.format(T("window size: %.2f  (/fb scale %s-%s, default %s)"), WindowScale(), SCALE_MIN, SCALE_MAX, SCALE_DEFAULT))
+        return
+    end
     if verb == "debug" then
         if class == "on" then debugOn = true
         elseif class == "off" then debugOn = false
         else debugOn = not debugOn end
-        Print("debug output: " .. (debugOn and "on (until you log out or /reload)" or "off") .. "  (/fb debug on|off)")
+        Print(debugOn and "debug output: on (until you log out or /reload)  (/fb debug on|off)" or "debug output: off  (/fb debug on|off)")
+        return
+    end
+    if verb == "tabicons" then
+        for i, t in ipairs(frameTabs) do
+            Print("tab " .. i .. " icon = " .. tostring(t.fbIcon and t.fbIcon:GetTexture()))
+        end
         return
     end
     if verb == "chatdiag" then
@@ -1871,7 +2334,7 @@ SlashCmdList.FOREVERBOTS = function(msg)
             GroupOrder("assign " .. class .. " " .. role .. ((extra and extra ~= "") and (" " .. extra) or ""))
             RequestListSoon()
         else
-            Print(T("/fb assign <name|target> <star|circle|diamond|triangle|moon|square|cross|skull> [tank|cc|kill]; /fb assign clear [marker|name]; /fb assign list"))
+            Print("/fb assign <name|target> <star|circle|diamond|triangle|moon|square|cross|skull> [tank|cc|kill]; /fb assign clear [marker|name]; /fb assign list")
         end
         return
     end
@@ -1889,7 +2352,7 @@ SlashCmdList.FOREVERBOTS = function(msg)
         -- /fb tank <name> <marker>, /fb tank <name> clear, /fb tank clear
         if class == "clear" then GroupOrder("clear tanks")
         elseif role and role ~= "" then GroupOrder("tank " .. class .. " " .. role)
-        else Print(T("/fb tank <name> <skull|cross|star|circle|diamond|triangle|moon|square|clear>; /fb tank clear")) end
+        else Print("/fb tank <name> <skull|cross|star|circle|diamond|triangle|moon|square|clear>; /fb tank clear") end
         return
     end
     if verb == "add" and class and class ~= "" then
@@ -1915,13 +2378,20 @@ SlashCmdList.FOREVERBOTS = function(msg)
     elseif verb == "distance" then
         local n = tonumber(class)
         if n then SetDistance(n)
-        else Print(string.format(T("distance: %s. /fb distance <1-20> sets how far the bots follow you."), ForeverBotsDB.distance and string.format(T("%d yards"), ForeverBotsDB.distance) or T("auto"))) end
+        else Print(string.format(T("distance: %s. /fb distance <1-20> sets how far the bots follow you."),
+            ForeverBotsDB.distance and string.format(T("%d yards"), ForeverBotsDB.distance) or T("auto"))) end
+    elseif verb == "resume" then
+        GroupOrder("resume")
+    elseif verb == "flee" then
+        GroupOrder("flee")
+    elseif verb == "quick" then
+        QuickParty()
     elseif verb == "maintank" then
         GroupOrder((class and class ~= "") and ("set main tank " .. class) or "set main tank")
     elseif verb == "" or verb == nil then
         Toggle()
     else
-        Print(T("/fb opens the window; /fb add <class> [tank|healer|dps]; /fb raidready; /fb call|dismiss|save|unsave|regear [name|all]; /fb delete <name>; /fb list; /fb fallback; /fb pullback; /fb rally; /fb formation circle|arrow|line|none; /fb spacing tight|close|spread; /fb distance <1-20>; /fb maintank [name]; /fb bot on|off; /fb tank <name> <marker>|clear; /fb assign <name> <marker> [role]|clear|list; /fb debug on|off"))
+        Print("/fb opens the window; /fb add <class> [tank|healer|dps]; /fb raidready; /fb call|dismiss|save|unsave|regear [name|all]; /fb delete <name>; /fb list; /fb fallback; /fb pullback; /fb rally; /fb formation circle|arrow|line|none; /fb spacing tight|close|spread; /fb distance <1-20>; /fb maintank [name]; /fb bot on|off; /fb tank <name> <marker>|clear; /fb assign <name> <marker> [role]|clear|list; /fb minimap on|off|reset; /fb scale <0.7-1.5>; /fb resume; /fb flee; /fb quick; /fb debug on|off")
     end
 end
 
@@ -1929,6 +2399,7 @@ end
 -- Tried a few times: the first send can be refused while the client is still loading.
 local function SayHello(attempt)
     attempt = attempt or 1
+    Step("hello to the server")
     local send = C_ChatInfo and C_ChatInfo.SendAddonMessage or SendAddonMessage
     local me = UnitName and UnitName("player")
     local sent = false
@@ -1936,9 +2407,9 @@ local function SayHello(attempt)
         local ok, res = pcall(send, ORDER_PREFIX, "hello", "WHISPER", me)
         sent = ok and (res == nil or res == true or res == 0 or (Enum and Enum.SendAddonMessageResult and res == Enum.SendAddonMessageResult.Success))
     end
-    -- The self-whisper alone did not reach the server in a live test (the download hint came to players who have the add-on), so
-    -- the same greeting also goes as a silent server command, once. It says nothing back.
-    if attempt == 1 then pcall(ServerCommand, ".bot addon") end
+    -- Chat to SAY is protected and a timer is not a click, so the silent ".bot addon" greeting is not sent from here; it rides
+    -- along with the first command the player sends (see ServerCommand).
+    Step("")
     if not sent and attempt < 4 and C_Timer and C_Timer.After then
         C_Timer.After(4, function() SayHello(attempt + 1) end)
     end
@@ -1947,9 +2418,10 @@ end
 local loader = CreateFrame("Frame")
 loader:RegisterEvent("PLAYER_LOGIN")
 loader:SetScript("OnEvent", function()
-    Print(T("type /fb for the bot window."))
+    Print("type /fb for the bot window.")
     if C_Timer and C_Timer.After then C_Timer.After(2, SayHello) else SayHello() end
     AddPopupEntry()
+    BuildMinimapButton()
     lastGroupSize = GroupSize()
     ShowDistance()
     if ForeverBotsDB.distance and lastGroupSize > 0 then distFrame.groupAt = Now() + 3 end
@@ -2008,10 +2480,12 @@ do
         if hooked[f] then return end
         hooked[f] = true
         found[#found + 1] = name
-        pcall(f.Hide, f)
-        pcall(hooksecurefunc, f, "Show", function(self) pcall(self.Hide, self) end)
+        -- alpha 0, not Hide(): Hide() on a protected frame from add-on code is a blocked call; SetAlpha is not
+        pcall(f.SetAlpha, f, 0)
+        pcall(hooksecurefunc, f, "Show", function(self) pcall(self.SetAlpha, self, 0) end)
     end
     local function Scan()
+        Step("issue reporter hide")
         for _, name in ipairs({ "IssueReporterButton", "IssueReporterFrame", "IssueReporter", "BetaIssueReporter", "BugReportButton", "BugReportFrame" }) do
             local f = _G[name]
             if type(f) == "table" and f.Hide and f.GetObjectType then HideFrame(name, f) end
@@ -2025,8 +2499,9 @@ do
     local watch = CreateFrame("Frame")
     watch:RegisterEvent("PLAYER_ENTERING_WORLD")
     watch:RegisterEvent("ADDON_LOADED")
-    watch:SetScript("OnEvent", function() pcall(Scan) end)
+    watch:SetScript("OnEvent", function() pcall(Scan); Step("") end)
     pcall(Scan)
+    Step("")
     ForeverBotsListIssueFrames = function() pcall(Scan); return found end
 end
 
@@ -2039,10 +2514,34 @@ end
 do
     local guard = CreateFrame("Frame")
     guard:RegisterEvent("ADDON_ACTION_FORBIDDEN")
-    guard:SetScript("OnEvent", function(_, _, addon, func)
-        if addon ~= ADDON then return end
+    pcall(guard.RegisterEvent, guard, "ADDON_ACTION_BLOCKED")
+    guard:SetScript("OnEvent", function(_, event, addon, func)
         func = type(func) == "string" and func or "?"
+        -- "Interface action failed because of an AddOn" in the chat frame right after login: say which add-on and which call, for
+        -- ours and for any other add-on, so the line can be read instead of guessed at (the pop-up names them only for a moment).
+        if addon ~= ADDON then
+            if type(addon) == "string" and not IsSecret(addon) then Print(string.format(T("the client blocked %s() for the add-on %s (%s)"), func, addon, event == "ADDON_ACTION_BLOCKED" and "blocked" or "forbidden")) end
+            return
+        end
+        if event == "ADDON_ACTION_BLOCKED" then
+            ForeverBotsDB.lastForbidden = { func = func, at = date and date("%Y-%m-%d %H:%M:%S") or "", blocked = true, step = currentStep }
+            Print(string.format(T("the client blocked %s() for ForeverBots (blocked) during: %s"), func, currentStep ~= "" and currentStep or "no step marked"))
+            return
+        end
         ForeverBotsDB.lastForbidden = { func = func, at = date and date("%Y-%m-%d %H:%M:%S") or "" }
+        -- which client globals carry our taint (issecurevariable is false and names us), so a report says where it came from
+        local tainted = {}
+        for _, n in ipairs({ "SlashCmdList", "hash_SlashCmdList", "ChatFrame1EditBox", "DEFAULT_CHAT_FRAME", "ChatEdit_SendText", "ChatEdit_ParseText",
+            "ChatFrame_OpenChat", "SendChatMessage", "RunMacroText", "UnitPopup_ShowMenu" }) do
+            local ok, secure, who = pcall(issecurevariable, n)
+            if ok and secure == false then tainted[#tainted + 1] = n .. "<-" .. tostring(who) end
+        end
+        ForeverBotsDB.lastForbidden.tainted = table.concat(tainted, ", ")
+        if func == "RunMacroText" then
+            Print(string.format(T("the client blocked RunMacroText() (an order button's macro) during: %s; tainted globals: %s"),
+                currentStep ~= "" and currentStep or "no step marked", #tainted > 0 and table.concat(tainted, ", ") or "none"))
+            return
+        end
         if func:find("SendChatMessage", 1, true) or func:find("SendAddonMessage", 1, true) then
             Print(string.format(T("the client blocked %s() (not allowed in this situation)"), func))
             return

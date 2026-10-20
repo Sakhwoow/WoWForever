@@ -3,7 +3,8 @@
 ## Notes: One-click PlayerbotV2 companions: add a bot of any class and role, call, dismiss and command your bots.
 ## Notes-ruRU: Боты-спутники в один щелчок: добавляйте ботов любого класса и роли, вызывайте, распускайте и командуйте ими.
 ## Author: Karrz
-## Version: 0.3.2
+## Version: 0.5.12.1
+## IconTexture: Interface\AddOns\ForeverBots\Textures\mono_fb64.tga
 ## SavedVariables: ForeverBotsDB
 
 ForeverBots.lua
