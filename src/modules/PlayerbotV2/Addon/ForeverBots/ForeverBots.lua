@@ -213,6 +213,9 @@ local RU = {
     ["raid ready: no bots joined. Save a group with /fb save all first."] = "рейд готов: боты не пришли. Сначала сохраните группу командой /fb save all.",
     ["raid ready: calling your saved bots..."] = "рейд готов: вызываю ваших сохранённых ботов...",
     ["raid ready: using your current group (%d)."] = "рейд готов: беру вашу текущую группу (%d).",
+    ["the client blocked %s() (not allowed in this situation)"] = "клиент запретил %s() (в этой ситуации нельзя)",
+    ["the client blocked %s() because of ForeverBots; the portrait menu entries are switched off after /reload (/fb menu on to bring them back). Please report this line."] =
+        "клиент запретил %s() из-за ForeverBots; пункты меню портрета будут выключены после /reload (/fb menu on вернёт их). Пожалуйста, сообщите об этой строке.",
     ["stance:"] = "режим:",
     ["type /fb for the bot window."] = "введите /fb, чтобы открыть окно ботов.",
     ["bot confirmations in chat: %s  (/fb chat on|off)"] = "подтверждения ботов в чате: %s  (/fb chat on|off)",
@@ -2041,10 +2044,10 @@ do
         func = type(func) == "string" and func or "?"
         ForeverBotsDB.lastForbidden = { func = func, at = date and date("%Y-%m-%d %H:%M:%S") or "" }
         if func:find("SendChatMessage", 1, true) or func:find("SendAddonMessage", 1, true) then
-            Print("the client blocked " .. func .. "() (not allowed in this situation)")
+            Print(string.format(T("the client blocked %s() (not allowed in this situation)"), func))
             return
         end
-        Print("the client blocked " .. func .. "() because of ForeverBots; the portrait menu entries are switched off after /reload (/fb menu on to bring them back). Please report this line.")
+        Print(string.format(T("the client blocked %s() because of ForeverBots; the portrait menu entries are switched off after /reload (/fb menu on to bring them back). Please report this line."), func))
         ForeverBotsDB.menuEntries = false
     end)
 end
