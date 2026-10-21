@@ -1,0 +1,65 @@
+-- Classic 1.60 (WoW Forever): задания старых квестов: данные, не вошедшие в 11_old_entities_updates_quests.sql из-за формата
+-- Источник: снифы официального сервера Classic (бета «актуал»), сборки 70245, 70291, 70338, 70425, 70450; сгенерировано ForeverSniffTools.
+-- UPDATE с защитным условием (меняют только если значение отличается и поле не правили вручную) и INSERT NOT EXISTS / IGNORE; ничего не удаляется.
+-- Повторный запуск безопасен (проверено прогоном дважды на копии снимка БД).
+
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90000084 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90000130 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90000131 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90000644 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90001034 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_template` SET `FlagsEx2` = 0 WHERE `ID` = 176 AND (`FlagsEx2` = 268435456) AND (NOT (`FlagsEx2` <=> 0));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90001764 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90002460 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90002461 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003544 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003545 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003546 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003560 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003561 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003580 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003581 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003584 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003614 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003624 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003640 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003641 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003654 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003674 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003684 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003694 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003700 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003701 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003702 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003710 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003711 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003744 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003754 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003755 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003764 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003765 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003800 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003801 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003814 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003824 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003834 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003984 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90003994 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90004044 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90004264 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90004265 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90004270 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90007920 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90009524 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_template` SET `FlagsEx2` = 0 WHERE `ID` = 1097 AND (`FlagsEx2` = 268435456) AND (NOT (`FlagsEx2` <=> 0));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90011414 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90021784 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90039010 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90039024 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90054814 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90054824 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90062814 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90063950 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_template` SET `FlagsEx2` = 0 WHERE `ID` = 6661 AND (`FlagsEx2` = 268435456) AND (NOT (`FlagsEx2` <=> 0));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90066610 AND (NOT (`Flags` <=> 32));
+UPDATE `quest_objectives` SET `Flags` = 32 WHERE `ID` = 90066614 AND (NOT (`Flags` <=> 32));
