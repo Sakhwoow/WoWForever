@@ -1,6 +1,7 @@
 // BotTextMgr / BotChatter - see header.
 
 #include "BotTextMgr.h"
+#include "BotL10nText.h"
 
 #include "BotAI.h"
 #include "BotIntent.h"
@@ -401,7 +402,8 @@ std::string GenerateReply(std::string const& bot_name, std::string const& msg, s
 
     std::vector<std::string> words;
     {
-        std::istringstream ss(Lower(msg));
+        // FoldRu: lower case of Latin and Cyrillic, "ё" -> "е", so a Russian line is matched like an English one.
+        std::istringstream ss(::Playerbot::V2::L10n::FoldRu(msg));
         std::string w;
         while (ss >> w)
         {
@@ -415,7 +417,10 @@ std::string GenerateReply(std::string const& bot_name, std::string const& msg, s
 
     // ike3: a greeting among the first eight words wins outright.
     for (size_t i = 0; i < words.size() && i < 8; ++i)
-        if (words[i] == "hi" || words[i] == "hey" || words[i] == "hello" || words[i] == "wazzup")
+        if (words[i] == "hi" || words[i] == "hey" || words[i] == "hello" || words[i] == "wazzup" ||
+            words[i] == "привет" || words[i] == "прив" || words[i] == "приветик" || words[i] == "здравствуй" ||
+            words[i] == "здравствуйте" || words[i] == "хай" || words[i] == "ку" || words[i] == "здарова" ||
+            words[i] == "дарова" || words[i] == "салют")
             return mgr.GetReply(ReplyType::Hello, sender_name);
 
     // Question answers, keyed by the opening word as ike3 did.
@@ -427,6 +432,15 @@ std::string GenerateReply(std::string const& bot_name, std::string const& msg, s
     else if (w0 == "where")                        question_key = "reply_question_where";
     else if (w0 == "why")                          question_key = "reply_question_why";
     else if (w0 == "am" || w0 == "are" || w0 == "is") question_key = "reply_question_is";
+    // the same opening words in Russian
+    else if (w0 == "что" || w0 == "чего" || w0 == "че" || w0 == "чо" || w0 == "какой" || w0 == "какая" || w0 == "какое")
+        question_key = "reply_question_what";
+    else if (w0 == "кто" || w0 == "кого" || w0 == "кому")   question_key = "reply_question_who";
+    else if (w0 == "когда")                                 question_key = "reply_question_when";
+    else if (w0 == "где" || w0 == "куда" || w0 == "откуда") question_key = "reply_question_where";
+    else if (w0 == "почему" || w0 == "зачем")               question_key = "reply_question_why";
+    else if ((w0 == "ты" || w0 == "вы" || w0 == "это") && msg.find('?') != std::string::npos)
+        question_key = "reply_question_is";
     else if (msg.find('?') != std::string::npos)   question_key = "reply_question_generic";
 
     std::string const name_lower = Lower(bot_name);

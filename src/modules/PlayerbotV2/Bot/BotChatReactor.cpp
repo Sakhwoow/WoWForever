@@ -10,6 +10,7 @@
 #include "BotPersonality.h"
 #include "BotRegistry.h"
 #include "BotTextMgr.h"
+#include "BotL10n.h"       // a ruRU sender is understood and answered in Russian
 #include "TradeTalk.h"
 #include "BotTradeShop.h"
 #include "BotTrade.h"
@@ -142,7 +143,8 @@ std::string Normalize(std::string const& in)
         last_was_space = false;
     }
     while (!out.empty() && out.back() == ' ') out.pop_back();
-    return out;
+    // Cyrillic lower case and "ё" -> "е" too, so Russian chat matches the Russian keywords below.
+    return V2::L10n::FoldRu(out);
 }
 
 // Returns true if normalized `hay` contains `needle` as a whole word.
@@ -186,8 +188,17 @@ ReactKind ClassifyMessage(std::string const& norm, std::string const& bot_first_
         ContainsWord(norm, "ty")     || ContainsWord(norm, "thx") ||
         ContainsWord(norm, "thanks") || ContainsWord(norm, "thank") ||
         ContainsWord(norm, "tyvm")   || ContainsWord(norm, "danke") ||
-        ContainsWord(norm, "merci")  || ContainsWord(norm, "gracias");
+        ContainsWord(norm, "merci")  || ContainsWord(norm, "gracias") ||
+        // Russian (folded: lower case, "ё" -> "е")
+        ContainsWord(norm, "спасибо") || ContainsWord(norm, "спс")     ||
+        ContainsWord(norm, "пасиб")   || ContainsWord(norm, "пасибо")  ||
+        ContainsWord(norm, "спасиб")  || ContainsWord(norm, "спасибки") ||
+        ContainsWord(norm, "благодарю") || ContainsWord(norm, "сенкс") ||
+        ContainsWord(norm, "мерси");
     const bool has_grats =
+        ContainsWord(norm, "грац")   || ContainsWord(norm, "гц")      ||
+        ContainsWord(norm, "гратц")  || ContainsWord(norm, "поздравляю") ||
+        ContainsWord(norm, "поздравляем") || ContainsWord(norm, "динь") ||
         ContainsWord(norm, "gz")     || ContainsWord(norm, "grats") ||
         ContainsWord(norm, "gratz")  || ContainsWord(norm, "congrats") ||
         ContainsWord(norm, "congratulations") ||
@@ -200,13 +211,20 @@ ReactKind ClassifyMessage(std::string const& norm, std::string const& bot_first_
     const bool has_laugh =
         ContainsWord(norm, "lol")  || ContainsWord(norm, "haha") ||
         ContainsWord(norm, "lmao") || ContainsWord(norm, "xd")   ||
-        ContainsWord(norm, "rofl");
+        ContainsWord(norm, "rofl") ||
+        ContainsWord(norm, "лол")  || ContainsWord(norm, "хаха")  ||
+        ContainsWord(norm, "ахах") || ContainsWord(norm, "ахаха") ||
+        ContainsWord(norm, "хахаха") || ContainsWord(norm, "хех") ||
+        ContainsWord(norm, "ржу")  || ContainsWord(norm, "кек")   ||
+        ContainsWord(norm, "хд")   || ContainsWord(norm, "ору");
     // "gg" / "wp" / "good game" — universal after-kill or end-of-BG line.
     // Folded into Grats reply pool ("gz!"/"nice"/"well done") since the
     // sentiment is the same (acknowledging a finish).
     const bool has_gg =
         ContainsWord(norm, "gg")        || ContainsWord(norm, "wp") ||
-        ContainsWord(norm, "wellplayed");
+        ContainsWord(norm, "wellplayed") ||
+        ContainsWord(norm, "гг")        || ContainsWord(norm, "вп") ||
+        ContainsWord(norm, "гж");
     // Behavioral cues: words real players type to coordinate the pull/pace
     // of the group. Bots don't execute these (the ;-prefix command path
     // does), but a one-line acknowledgement reads like a focused human
@@ -220,9 +238,22 @@ ReactKind ClassifyMessage(std::string const& norm, std::string const& bot_first_
         ContainsWord(norm, "back")    || ContainsWord(norm, "regroup") ||
         ContainsWord(norm, "rg")      || ContainsWord(norm, "inc")     ||
         ContainsWord(norm, "incoming")|| ContainsWord(norm, "afk")     ||
-        ContainsWord(norm, "brb");
+        ContainsWord(norm, "brb")     ||
+        ContainsWord(norm, "пул")     || ContainsWord(norm, "пулю")    ||
+        ContainsWord(norm, "тяну")    || ContainsWord(norm, "го")      ||
+        ContainsWord(norm, "погнали") || ContainsWord(norm, "жди")     ||
+        ContainsWord(norm, "ждите")   || ContainsWord(norm, "подожди") ||
+        ContainsWord(norm, "подождите") || ContainsWord(norm, "стой")  ||
+        ContainsWord(norm, "стойте")  || ContainsWord(norm, "стоп")    ||
+        ContainsWord(norm, "назад")   || ContainsWord(norm, "отходим") ||
+        ContainsWord(norm, "рег")     || ContainsWord(norm, "инк")     ||
+        ContainsWord(norm, "афк")     || ContainsWord(norm, "щас")     ||
+        ContainsWord(norm, "сек");
     const bool has_ready =
-        ContainsWord(norm, "ready")   || ContainsWord(norm, "rdy");
+        ContainsWord(norm, "ready")   || ContainsWord(norm, "rdy")     ||
+        ContainsWord(norm, "готов")   || ContainsWord(norm, "готова")  ||
+        ContainsWord(norm, "готовы")  || ContainsWord(norm, "гот")     ||
+        ContainsWord(norm, "+");
     // Greeting tokens — the kind of thing said when a player joins
     // /p or just opens the conversation. EU mix again (German/French/
     // Spanish hello variants). "yo" / "hey" / "hi" / "sup" are also
@@ -232,7 +263,15 @@ ReactKind ClassifyMessage(std::string const& norm, std::string const& bot_first_
         ContainsWord(norm, "hey")   || ContainsWord(norm, "yo")    ||
         ContainsWord(norm, "sup")   || ContainsWord(norm, "hallo") ||
         ContainsWord(norm, "bonjour") || ContainsWord(norm, "hola") ||
-        ContainsWord(norm, "moin");
+        ContainsWord(norm, "moin")  ||
+        ContainsWord(norm, "привет") || ContainsWord(norm, "прив")  ||
+        ContainsWord(norm, "приветик") || ContainsWord(norm, "здравствуй") ||
+        ContainsWord(norm, "здравствуйте") || ContainsWord(norm, "здарова") ||
+        ContainsWord(norm, "здорово") || ContainsWord(norm, "дарова") ||
+        ContainsWord(norm, "хай")   || ContainsWord(norm, "ку")    ||
+        ContainsWord(norm, "салют") || ContainsWord(norm, "йо")    ||
+        ContainsWord(norm, "доброе утро") || ContainsWord(norm, "добрый день") ||
+        ContainsWord(norm, "добрый вечер");
     // Location query — "where are you" / "wo bist du" / "where r u".
     // Triggers a zone-aware reply ("im in {zone}") instead of the generic
     // "?" direct-address response. SC-P1c: this is now answered on BOTH the
@@ -244,7 +283,7 @@ ReactKind ClassifyMessage(std::string const& norm, std::string const& bot_first_
     // next?" must not trip a zone dump from every bot).
     const bool has_location_query =
         ContainsWord(norm, "where") || ContainsWord(norm, "wherer") ||
-        ContainsWord(norm, "wo");
+        ContainsWord(norm, "wo")    || ContainsWord(norm, "где");
 
     // When a social keyword AND the bot's name are both present, the social
     // keyword wins ("gz Aron" → Aron replies "ty!", not "yes?"). When only
@@ -296,10 +335,126 @@ inline char const* PickFromTier(Politeness pol, uint32 sel,
 }
 #define POOL(arr) (arr), (sizeof(arr) / sizeof((arr)[0]))
 
+// The same pools in Russian for a ruRU sender: the chat slang Russian players type, worded so it fits a bot of either
+// gender ("принято", "+", "я в деле" rather than "понял" / "готов").
+char const* PickReplyRu(ReactKind k, bool addressed, uint32 sel, AckFlavor ack, Politeness pol)
+{
+    switch (k)
+    {
+        case ReactKind::Thanks:
+        {
+            static constexpr char const* kRude[]   = { "нз", "ага", "ок", "да не за что" };
+            static constexpr char const* kNeut[]   = {
+                "нз", "не за что!", "обращайся", "без проблем",
+                "нз :)", "всегда пожалуйста", "не за что",
+            };
+            static constexpr char const* kPolite[] = {
+                "всегда пожалуйста!", "с удовольствием :)", "обращайся, друг",
+                "мне только в радость", "да не за что :)", "всегда рады помочь!",
+            };
+            return PickFromTier(pol, sel, POOL(kRude), POOL(kNeut), POOL(kPolite));
+        }
+        case ReactKind::Grats:
+        {
+            if (addressed)
+            {
+                static constexpr char const* kRude[]   = { "спс", "спасибо", "ага" };
+                static constexpr char const* kNeut[]   = {
+                    "спс!", "спасибо!", "спасибо :)", "спс :)",
+                    "всем спасибо!", "спс всем!",
+                };
+                static constexpr char const* kPolite[] = {
+                    "огромное спасибо! :)", "ой, спасибо всем!",
+                    "спасибо, очень приятно", "спс всем, вы лучшие :)",
+                };
+                return PickFromTier(pol, sel, POOL(kRude), POOL(kNeut), POOL(kPolite));
+            }
+            static constexpr char const* kRude[]   = { "гц", "гг", "норм" };
+            static constexpr char const* kNeut[]   = {
+                "гц!", "грац!", "поздравляю!", "круто :)",
+                "гц :)", "отлично", "гг!", "вп!",
+            };
+            static constexpr char const* kPolite[] = {
+                "поздравляю! :)", "заслуженно, грац!", "грац, это здорово!",
+                "отлично сработано :)", "огромный грац!",
+            };
+            return PickFromTier(pol, sel, POOL(kRude), POOL(kNeut), POOL(kPolite));
+        }
+        case ReactKind::Laugh:
+        {
+            static constexpr char const* kPool[] = { "лол", "хаха", "хех", ":)", "xD" };
+            return kPool[sel % (sizeof(kPool) / sizeof(kPool[0]))];
+        }
+        case ReactKind::Acknowledge:
+        {
+            switch (ack)
+            {
+                case AckFlavor::Pause:
+                {
+                    static constexpr char const* kPool[] = { "ок, жду", "жду", "стою", "ок", "ага", "принято, жду", "конечно" };
+                    return kPool[sel % (sizeof(kPool) / sizeof(kPool[0]))];
+                }
+                case AckFlavor::Go:
+                {
+                    static constexpr char const* kPool[] = { "иду", "погнали", "ок, тяну", "ага", "уже", "в бой", "го" };
+                    return kPool[sel % (sizeof(kPool) / sizeof(kPool[0]))];
+                }
+                case AckFlavor::Inc:
+                {
+                    static constexpr char const* kPool[] = { "смотрю", "принято", "уже", "наготове", "ок", "слежу" };
+                    return kPool[sel % (sizeof(kPool) / sizeof(kPool[0]))];
+                }
+                case AckFlavor::Drink:
+                {
+                    static constexpr char const* kPool[] = { "ок, пей", "тоже попью", "ок", "ок, пьём", "передышка", "ок :)" };
+                    return kPool[sel % (sizeof(kPool) / sizeof(kPool[0]))];
+                }
+                case AckFlavor::Generic:
+                default: break;
+            }
+            static constexpr char const* kRude[]   = { "ок", "окей", "ладно", "ага" };
+            static constexpr char const* kNeut[]   = { "ок", "окей", "уже", "принято", "ок :)", "конечно", "ага" };
+            static constexpr char const* kPolite[] = { "конечно :)", "уже делаю!", "принято, спасибо", "хорошо :)", "сделаю!" };
+            return PickFromTier(pol, sel, POOL(kRude), POOL(kNeut), POOL(kPolite));
+        }
+        case ReactKind::Ready:
+        {
+            static constexpr char const* kPool[] = { "+", "гот", "+!", "да", "ага", "я в деле :)", "тут, в деле" };
+            return kPool[sel % (sizeof(kPool) / sizeof(kPool[0]))];
+        }
+        case ReactKind::DirectAddress:
+        {
+            static constexpr char const* kRude[]   = { "?", "чего", "хм?", "ну?" };
+            static constexpr char const* kNeut[]   = { "?", "да?", "хм?", "что такое?", "а?" };
+            static constexpr char const* kPolite[] = { "да? :)", "привет, что случилось?", "да, чем помочь?", "привет! звали?" };
+            return PickFromTier(pol, sel, POOL(kRude), POOL(kNeut), POOL(kPolite));
+        }
+        case ReactKind::Greeting:
+        {
+            static constexpr char const* kRude[]   = { "прив", "хай", "ку", "здарова" };
+            static constexpr char const* kNeut[]   = {
+                "привет", "привет!", "хай", "здравствуй", "ку",
+                "привет :)", "приветик", "привет-привет", "всем привет",
+            };
+            static constexpr char const* kPolite[] = {
+                "привет! :)", "здравствуйте! :)", "привет, вот это встреча", "приветик :)",
+                "всем привет!", "доброго времени суток :)",
+            };
+            return PickFromTier(pol, sel, POOL(kRude), POOL(kNeut), POOL(kPolite));
+        }
+        case ReactKind::None:
+        default:
+            return nullptr;
+    }
+}
+
 char const* PickReply(ReactKind k, bool addressed, uint32 sel,
                       AckFlavor ack = AckFlavor::Generic,
-                      Politeness pol = Politeness::Neutral)
+                      Politeness pol = Politeness::Neutral,
+                      bool ru = false)
 {
+    if (ru)
+        return PickReplyRu(k, addressed, sel, ack, pol);
     switch (k)
     {
         case ReactKind::Thanks:
@@ -446,14 +601,14 @@ char const* PickReply(ReactKind k, bool addressed, uint32 sel,
 // case, so "where are you Aron?" in /p returned silence). `sel` chooses the
 // template + (for politeness) tone. Falls back to a numeric area id when the
 // locale string is empty (rare).
-std::string BuildLocationReply(Player* bot, uint32 sel, Politeness pol)
+std::string BuildLocationReply(Player* bot, uint32 sel, Politeness pol, bool ru = false)
 {
     uint32 const area_id = bot->GetAreaId();
     std::string area_name;
     if (auto const* ae = sAreaTableStore.LookupEntry(area_id))
         area_name = ae->AreaName[sWorld->GetDefaultDbcLocale()];
     if (area_name.empty())
-        area_name = "area " + std::to_string(area_id);
+        area_name = (ru ? "зона " : "area ") + std::to_string(area_id);
 
     static constexpr char const* kRude[]   = { "{}", "im in {}", "{} atm" };
     static constexpr char const* kNeut[]   = {
@@ -463,10 +618,27 @@ std::string BuildLocationReply(Player* bot, uint32 sel, Politeness pol)
         "i'm over in {} :)", "currently in {}, come find me!",
         "im in {} right now :)", "you'll find me in {}",
     };
-    char const* const* pool = kNeut;
-    size_t n = sizeof(kNeut) / sizeof(kNeut[0]);
-    if (pol == Politeness::Rude)   { pool = kRude;   n = sizeof(kRude) / sizeof(kRude[0]); }
-    if (pol == Politeness::Polite) { pool = kPolite; n = sizeof(kPolite) / sizeof(kPolite[0]); }
+    // Russian: the zone name stays in its own case inside the quotes ("я в зоне «Тирисфальские леса»").
+    static constexpr char const* kRudeRu[]   = { "{}", "тут: {}", "в зоне «{}»" };
+    static constexpr char const* kNeutRu[]   = {
+        "я в зоне «{}»", "сейчас тут: {}", "{}, сейчас здесь", "сейчас в зоне «{}»",
+    };
+    static constexpr char const* kPoliteRu[] = {
+        "я сейчас в зоне «{}» :)", "сейчас в зоне «{}», заходи!",
+        "я тут: {}, приходи :)", "найдёшь меня в зоне «{}»",
+    };
+    char const* const* pool = ru ? kNeutRu : kNeut;
+    size_t n = ru ? sizeof(kNeutRu) / sizeof(kNeutRu[0]) : sizeof(kNeut) / sizeof(kNeut[0]);
+    if (pol == Politeness::Rude)
+    {
+        pool = ru ? kRudeRu : kRude;
+        n = ru ? sizeof(kRudeRu) / sizeof(kRudeRu[0]) : sizeof(kRude) / sizeof(kRude[0]);
+    }
+    if (pol == Politeness::Polite)
+    {
+        pool = ru ? kPoliteRu : kPolite;
+        n = ru ? sizeof(kPoliteRu) / sizeof(kPoliteRu[0]) : sizeof(kPolite) / sizeof(kPolite[0]);
+    }
 
     std::string t = pool[sel % n];
     auto const pos = t.find("{}");
@@ -484,26 +656,30 @@ V2::ConversationContext MakeConvContext(Player* bot, BotAI* ai, Player* sender)
 {
     static constexpr char const* kClass[] = { "", "warrior", "paladin", "hunter", "rogue", "priest", "death knight", "shaman",
                                                "mage", "warlock", "monk", "druid", "demon hunter", "evoker" };
+    static constexpr char const* kClassRu[] = { "", "воин", "паладин", "охотник", "разбойник", "жрец", "рыцарь смерти", "шаман",
+                                                 "маг", "чернокнижник", "монах", "друид", "охотник на демонов", "пробудитель" };
     V2::ConversationContext ctx;
+    ctx.ru          = V2::L10n::IsRu(sender);
     ctx.self_name   = bot->GetName();
     ctx.sender_name = sender->GetName();
     ctx.knows_sender = bot->GetGroup() && bot->GetGroup()->IsMember(sender->GetGUID());
     uint8 const cls = bot->GetClass();
-    ctx.class_name  = cls < sizeof(kClass) / sizeof(kClass[0]) && kClass[cls][0] ? kClass[cls] : "adventurer";
+    char const* const* classes = ctx.ru ? kClassRu : kClass;
+    ctx.class_name  = cls < sizeof(kClass) / sizeof(kClass[0]) && classes[cls][0] ? classes[cls] : (ctx.ru ? "путник" : "adventurer");
     ctx.level       = bot->GetLevel();
     if (auto const* ae = sAreaTableStore.LookupEntry(bot->GetAreaId()))
         ctx.zone = ae->AreaName[sWorld->GetDefaultDbcLocale()];
     ctx.in_group = bot->GetGroup() != nullptr;
-    ctx.activity = "just hanging around";
+    ctx.activity = ctx.ru ? "просто отдыхаю" : "just hanging around";
     if (ctx.in_group)
-        ctx.activity = "running with a group";
+        ctx.activity = ctx.ru ? "бегаю с группой" : "running with a group";
     else if (ai)
     {
         switch (ai->activity_mode())
         {
-            case BotAI::ActivityMode::Questing:      ctx.activity = "out questing"; break;
-            case BotAI::ActivityMode::Professioning: ctx.activity = "running errands in town"; break;
-            case BotAI::ActivityMode::Wandering:     ctx.activity = "just wandering around"; break;
+            case BotAI::ActivityMode::Questing:      ctx.activity = ctx.ru ? "выполняю задания" : "out questing"; break;
+            case BotAI::ActivityMode::Professioning: ctx.activity = ctx.ru ? "занимаюсь делами в городе" : "running errands in town"; break;
+            case BotAI::ActivityMode::Wandering:     ctx.activity = ctx.ru ? "просто брожу по округе" : "just wandering around"; break;
         }
     }
     for (uint16 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)
@@ -512,18 +688,24 @@ V2::ConversationContext MakeConvContext(Player* bot, BotAI* ai, Player* sender)
             if (Quest const* q = sObjectMgr->GetQuestTemplate(qid))
             {
                 ctx.quest_title = q->GetLogTitle();
+                if (ctx.ru)
+                    if (QuestTemplateLocale const* ql = sObjectMgr->GetQuestLocale(qid))
+                        ObjectMgr::GetLocaleString(ql->LogTitle, LOCALE_ruRU, ctx.quest_title);
                 break;
             }
     }
     ctx.guild_name = bot->GetGuildName();
-    static constexpr std::pair<uint32, char const*> kProfessions[] = {
-        { SKILL_ALCHEMY, "alchemy" }, { SKILL_BLACKSMITHING, "blacksmithing" }, { SKILL_ENCHANTING, "enchanting" },
-        { SKILL_ENGINEERING, "engineering" }, { SKILL_HERBALISM, "herbalism" }, { SKILL_LEATHERWORKING, "leatherworking" },
-        { SKILL_MINING, "mining" }, { SKILL_SKINNING, "skinning" }, { SKILL_TAILORING, "tailoring" },
+    struct Prof { uint32 skill; char const* en; char const* ru; };
+    static constexpr Prof kProfessions[] = {
+        { SKILL_ALCHEMY, "alchemy", "алхимия" }, { SKILL_BLACKSMITHING, "blacksmithing", "кузнечное дело" },
+        { SKILL_ENCHANTING, "enchanting", "наложение чар" }, { SKILL_ENGINEERING, "engineering", "инженерное дело" },
+        { SKILL_HERBALISM, "herbalism", "травничество" }, { SKILL_LEATHERWORKING, "leatherworking", "кожевничество" },
+        { SKILL_MINING, "mining", "горное дело" }, { SKILL_SKINNING, "skinning", "снятие шкур" },
+        { SKILL_TAILORING, "tailoring", "портняжное дело" },
     };
-    for (auto const& pr : kProfessions)
-        if (bot->HasSkill(pr.first))
-            ctx.professions.emplace_back(pr.second);
+    for (Prof const& pr : kProfessions)
+        if (bot->HasSkill(pr.skill))
+            ctx.professions.emplace_back(ctx.ru ? pr.ru : pr.en);
     if (ai)
     {
         BotPersonality const& pers = ai->personality();
@@ -559,7 +741,12 @@ bool IsPauseCue(std::string const& norm)
            ContainsWord(norm, "stop")    ||
            ContainsWord(norm, "back")    ||
            ContainsWord(norm, "regroup") ||
-           ContainsWord(norm, "rg");
+           ContainsWord(norm, "rg")      ||
+           ContainsWord(norm, "жди")     || ContainsWord(norm, "ждите")  ||
+           ContainsWord(norm, "подожди") || ContainsWord(norm, "подождите") ||
+           ContainsWord(norm, "стой")    || ContainsWord(norm, "стойте") ||
+           ContainsWord(norm, "стоп")    || ContainsWord(norm, "назад")  ||
+           ContainsWord(norm, "отходим") || ContainsWord(norm, "рег");
 }
 // Drink cue — healer or caster announces a mana break. Triggers a
 // LONGER pause (30s) than the standard wait cue because a real drink
@@ -572,7 +759,9 @@ bool IsDrinkCue(std::string const& norm)
     return ContainsWord(norm, "drink") ||
            ContainsWord(norm, "drinking") ||
            ContainsWord(norm, "mb")  ||   // "mana break"
-           ContainsWord(norm, "oom");     // "out of mana"
+           ContainsWord(norm, "oom") ||   // "out of mana"
+           ContainsWord(norm, "пью") || ContainsWord(norm, "попью") ||
+           ContainsWord(norm, "оом") || ContainsWord(norm, "без маны");
 }
 // "go" / "pull" / "pulling" — the inverse cue: clear any pause so a
 // previous "wait" doesn't keep the group frozen indefinitely.
@@ -581,7 +770,16 @@ bool IsGoCue(std::string const& norm)
     return ContainsWord(norm, "go")      ||
            ContainsWord(norm, "pull")    ||
            ContainsWord(norm, "pulling") ||
-           ContainsWord(norm, "engage");
+           ContainsWord(norm, "engage")  ||
+           ContainsWord(norm, "го")      || ContainsWord(norm, "погнали") ||
+           ContainsWord(norm, "пул")     || ContainsWord(norm, "пулю")    ||
+           ContainsWord(norm, "тяну")    || ContainsWord(norm, "вперед");
+}
+// "inc" / "incoming" — enemies on the way: a short alert pause.
+bool IsIncCue(std::string const& norm)
+{
+    return ContainsWord(norm, "inc") || ContainsWord(norm, "incoming") ||
+           ContainsWord(norm, "инк") || ContainsWord(norm, "идут");
 }
 
 // Pause window — 12s. Long enough to cover a typical "wait, healer is
@@ -599,9 +797,10 @@ std::string FirstNameLower(std::string const& name)
     for (char c : name)
     {
         if (c == ' ' || c == '\t') break;
-        out.push_back(char(std::tolower(static_cast<unsigned char>(c))));
+        out.push_back(c);
     }
-    return out;
+    // the same folding as Normalize(), so a Cyrillic name is found in a folded line
+    return V2::L10n::FoldRu(out);
 }
 
 // Verbosity gate. Returns false when the bot is too quiet to react.
@@ -714,8 +913,7 @@ void BotChatReactor::React(Player* sender, Group* group, std::string const& msg)
     {
         const bool pause = IsPauseCue(norm);
         const bool go    = IsGoCue(norm);
-        const bool inc   = ContainsWord(norm, "inc") ||
-                           ContainsWord(norm, "incoming");
+        const bool inc   = IsIncCue(norm);
         const bool drink = IsDrinkCue(norm);
         if (pause || go || inc || drink)
         {
@@ -774,8 +972,7 @@ void BotChatReactor::React(Player* sender, Group* group, std::string const& msg)
     if (IsDrinkCue(norm))                       ack_flavor = AckFlavor::Drink;
     else if (IsPauseCue(norm))                  ack_flavor = AckFlavor::Pause;
     else if (IsGoCue(norm))                     ack_flavor = AckFlavor::Go;
-    else if (ContainsWord(norm, "inc") ||
-             ContainsWord(norm, "incoming"))    ack_flavor = AckFlavor::Inc;
+    else if (IsIncCue(norm))                    ack_flavor = AckFlavor::Inc;
 
     // `extra_delay_ms` staggers a 2nd addressed bot so a duo doesn't reply on
     // the same tick (SC-P1b multi-name cap fallback).
@@ -813,7 +1010,7 @@ void BotChatReactor::React(Player* sender, Group* group, std::string const& msg)
         }
         else if (c.kind == ReactKind::LocationQuery)
         {
-            reply_str = BuildLocationReply(c.bot, sel, pol);
+            reply_str = BuildLocationReply(c.bot, sel, pol, V2::L10n::IsRu(sender));
         }
         else
         {
@@ -823,7 +1020,7 @@ void BotChatReactor::React(Player* sender, Group* group, std::string const& msg)
                 reply_str = BotChatter::GenerateReply(c.bot->GetName(), msg, sender->GetName());
             if (reply_str.empty())
             {
-                char const* reply = PickReply(c.kind, c.addressed, sel, ack_flavor, pol);
+                char const* reply = PickReply(c.kind, c.addressed, sel, ack_flavor, pol, V2::L10n::IsRu(sender));
                 if (!reply || !*reply) return;
                 reply_str = reply;
             }
@@ -1082,7 +1279,7 @@ void BotChatReactor::ReactWhisper(Player* sender, Player* bot, std::string const
     {
         // SC-P1c: shared zone-aware reply builder (also used by the party
         // path now). Resolves the bot's current AreaTable.db2 zone.
-        reply_str = BuildLocationReply(bot, sel, pol);
+        reply_str = BuildLocationReply(bot, sel, pol, V2::L10n::IsRu(sender));
     }
     else
     {
@@ -1095,10 +1292,10 @@ void BotChatReactor::ReactWhisper(Player* sender, Player* bot, std::string const
         if (reply_str.empty())
         {
             char const* reply = PickReply(kind, /*addressed=*/true, sel,
-                                          AckFlavor::Generic, pol);
+                                          AckFlavor::Generic, pol, V2::L10n::IsRu(sender));
             // A whisper always gets an answer: a kind with no pool falls back to the "yes?" pool.
             if (!reply || !*reply)
-                reply = PickReply(ReactKind::DirectAddress, /*addressed=*/true, sel, AckFlavor::Generic, pol);
+                reply = PickReply(ReactKind::DirectAddress, /*addressed=*/true, sel, AckFlavor::Generic, pol, V2::L10n::IsRu(sender));
             if (!reply || !*reply)
             {
                 TC_LOG_INFO("playerbot.v2", "[conv] {} <- {} whisper \"{}\": no reply (kind {} has no pool)", bot->GetName(),
@@ -1218,7 +1415,7 @@ void BotChatReactor::ReactGuild(Player* sender, uint64 guild_id, std::string con
     const uint32 sender_low = sender->GetGUID().GetCounter();
     auto const& chosen = candidates.front();
     const uint32 sel = sender_low ^ uint32(chosen.id) ^ now_ms;
-    char const* reply = PickReply(chosen.kind, chosen.addressed, sel);
+    char const* reply = PickReply(chosen.kind, chosen.addressed, sel, AckFlavor::Generic, Politeness::Neutral, V2::L10n::IsRu(sender));
     if (!reply || !*reply) return;
 
     // Stamp the throttle only AFTER confirming a reply will emit. The
@@ -1376,8 +1573,7 @@ void ReactSpoken(Player* sender, std::string const& msg, bool is_yell,
     if (IsDrinkCue(norm))                       ack_flavor = AckFlavor::Drink;
     else if (IsPauseCue(norm))                  ack_flavor = AckFlavor::Pause;
     else if (IsGoCue(norm))                     ack_flavor = AckFlavor::Go;
-    else if (ContainsWord(norm, "inc") ||
-             ContainsWord(norm, "incoming"))    ack_flavor = AckFlavor::Inc;
+    else if (IsIncCue(norm))                    ack_flavor = AckFlavor::Inc;
 
     // Prefer an addressed bot; else pick one stably by hash and apply the
     // probabilistic fire gate so not every ambient line is answered.
@@ -1449,7 +1645,7 @@ void ReactSpoken(Player* sender, std::string const& msg, bool is_yell,
     {
     }
     else if (chosen->kind == ReactKind::LocationQuery)
-        reply_str = BuildLocationReply(chosen->bot, sel, pol);
+        reply_str = BuildLocationReply(chosen->bot, sel, pol, V2::L10n::IsRu(sender));
     else
     {
         if (world_say && BotTextMgr::instance().Enabled())
@@ -1463,7 +1659,7 @@ void ReactSpoken(Player* sender, std::string const& msg, bool is_yell,
         if (reply_str.empty())
         {
             char const* reply = PickReply(chosen->kind, chosen->addressed, sel,
-                                          ack_flavor, pol);
+                                          ack_flavor, pol, V2::L10n::IsRu(sender));
             if (!reply || !*reply) return;
             reply_str = reply;
         }

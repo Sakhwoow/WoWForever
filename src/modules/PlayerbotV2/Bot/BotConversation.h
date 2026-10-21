@@ -56,6 +56,7 @@ struct ConversationContext
     uint32_t level = 1;
     bool in_group = false;
     bool knows_sender = false;             // the sender is in the bot's group (its owner / party): greet them as a known person
+    bool ru = false;                       // the sender's client is Russian: answer in Russian (the fields above are then Russian too)
     uint32_t bot_seed = 0;                 // stable per bot: drives its writing style
     ConvTone tone = ConvTone::Neutral;
     ConvLength length = ConvLength::Normal;

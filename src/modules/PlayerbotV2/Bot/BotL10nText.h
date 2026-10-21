@@ -140,8 +140,10 @@ inline constexpr WordPair kRoleWords[] = {
     { "защитника", "tank" },
     { "лекарь", "healer" }, { "лекаря", "healer" }, { "лекари", "healer" }, { "хил", "healer" }, { "хила", "healer" },
     { "хилер", "healer" }, { "хилера", "healer" }, { "целитель", "healer" }, { "целителя", "healer" },
+    { "хилл", "healer" }, { "хилла", "healer" }, { "хиллер", "healer" }, { "хиллера", "healer" }, { "хилом", "healer" },
+    { "хилка", "healer" }, { "хилку", "healer" }, { "лекарем", "healer" },
     { "урон", "dps" }, { "дд", "dps" }, { "ддшник", "dps" }, { "ддшника", "dps" }, { "дпс", "dps" }, { "дамаг", "dps" },
-    { "дамагер", "dps" }, { "дамагдилер", "dps" },
+    { "дамагер", "dps" }, { "дамагдилер", "dps" }, { "дпсер", "dps" }, { "дпса", "dps" }, { "рдд", "dps" }, { "мдд", "dps" },
 };
 
 // Races. The Classic ones are what `.bot add` accepts; the others are the names ParseRace knows. A two-word name

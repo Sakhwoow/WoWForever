@@ -20,6 +20,7 @@ Applied in ascending numeric order; each file records itself in
 - `0023_companion_gear_varied.sql` — `playerbot_v2_character.gear_varied`: a companion geared before per-bot gear variety gets one full gear re-roll, then never again
 - `0024_companion_role.sql` — `playerbot_v2_character.companion_role`: a companion's declared role (tank/healer/dps), kept across relog, `.bot call` and restart
 - `0025_owner_gear_mode.sql` — `playerbot_v2_owner_gear`: the gear mode (match / best / t1 / t2 / t3) an owner chose for their companions, per owner account
+- `0033_bot_text_ru.sql` — (shared DB) the bots' speech lines in Russian (Forever): the ike3 lines from the Russian translation of mod-playerbots, the rest by hand
 
 ## Discipline
 - Never edit a numbered migration after it ships. Add a new one to amend.
