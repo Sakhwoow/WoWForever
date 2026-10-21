@@ -1,0 +1,63 @@
+-- Classic 1.60 (WoW Forever): старые существа и объекты: русские названия (locale ruRU)
+-- ТОЛЬКО UPDATE различий у уже существующих (старых) сущностей по данным официального сервера (сборки снифов 70245-70425, для каждой сущности берётся самая свежая).
+-- Каждый UPDATE меняет строку только если значение действительно отличается; повторный запуск безопасен.
+-- Сгенерировано ForeverSniffTools (tools/gen_updates.py)
+
+UPDATE `creature_template_locale` SET `Name` = 'Страж смерти Линнея' WHERE `entry` = 1495 AND `locale` = 'ruRU' AND (NOT (CAST(`Name` AS BINARY) <=> CAST('Страж смерти Линнея' AS BINARY)));
+UPDATE `creature_template_locale` SET `Name` = 'Презренный зомби' WHERE `entry` = 1502 AND `locale` = 'ruRU' AND (NOT (CAST(`Name` AS BINARY) <=> CAST('Презренный зомби' AS BINARY)));
+UPDATE `creature_template_locale` SET `Name` = 'Новообращенный из Алого ордена' WHERE `entry` = 1506 AND `locale` = 'ruRU' AND (NOT (CAST(`Name` AS BINARY) <=> CAST('Новообращенный из Алого ордена' AS BINARY)));
+UPDATE `creature_template_locale` SET `Name` = 'Келейник из Алого ордена' WHERE `entry` = 1538 AND `locale` = 'ruRU' AND (NOT (CAST(`Name` AS BINARY) <=> CAST('Келейник из Алого ордена' AS BINARY)));
+UPDATE `creature_template_locale` SET `Name` = 'Страж смерти Берджес' WHERE `entry` = 1652 AND `locale` = 'ruRU' AND (NOT (CAST(`Name` AS BINARY) <=> CAST('Страж смерти Берджес' AS BINARY)));
+UPDATE `creature_template_locale` SET `Name` = 'Ученица Элрет' WHERE `entry` = 1661 AND `locale` = 'ruRU' AND (NOT (CAST(`Name` AS BINARY) <=> CAST('Ученица Элрет' AS BINARY)));
+UPDATE `creature_template_locale` SET `Name` = 'Страж смерти Рэндольф' WHERE `entry` = 1736 AND `locale` = 'ruRU' AND (NOT (CAST(`Name` AS BINARY) <=> CAST('Страж смерти Рэндольф' AS BINARY)));
+UPDATE `creature_template_locale` SET `Name` = 'Пленный ревнитель из Алого ордена' WHERE `entry` = 1931 AND `locale` = 'ruRU' AND (NOT (CAST(`Name` AS BINARY) <=> CAST('Пленный ревнитель из Алого ордена' AS BINARY)));
+UPDATE `creature_template_locale` SET `Title` = 'Ученица травника' WHERE `entry` = 2114 AND `locale` = 'ruRU' AND (NOT (CAST(`Title` AS BINARY) <=> CAST('Ученица травника' AS BINARY)));
+UPDATE `creature_template_locale` SET `Title` = 'Хозяйственные припасы' WHERE `entry` = 2118 AND `locale` = 'ruRU' AND (NOT (CAST(`Title` AS BINARY) <=> CAST('Хозяйственные припасы' AS BINARY)));
+UPDATE `creature_template_locale` SET `Title` = 'Подмастерье алхимика' WHERE `entry` = 2132 AND `locale` = 'ruRU' AND (NOT (CAST(`Title` AS BINARY) <=> CAST('Подмастерье алхимика' AS BINARY)));
+UPDATE `creature_template_locale` SET `Name` = 'Страж смерти Ройанна' WHERE `entry` = 2210 AND `locale` = 'ruRU' AND (NOT (CAST(`Name` AS BINARY) <=> CAST('Страж смерти Ройанна' AS BINARY)));
+UPDATE `creature_template_locale` SET `Title` = 'Хозяин дирижабля' WHERE `entry` = 3150 AND `locale` = 'ruRU' AND (NOT (CAST(`Title` AS BINARY) <=> CAST('Хозяин дирижабля' AS BINARY)));
+UPDATE `creature_template_locale` SET `Title` = 'Подмастерье портного' WHERE `entry` = 3523 AND `locale` = 'ruRU' AND (NOT (CAST(`Title` AS BINARY) <=> CAST('Подмастерье портного' AS BINARY)));
+UPDATE `creature_template_locale` SET `Title` = 'Все для алхимиков и травников' WHERE `entry` = 3548 AND `locale` = 'ruRU' AND (NOT (CAST(`Title` AS BINARY) <=> CAST('Все для алхимиков и травников' AS BINARY)));
+UPDATE `creature_template_locale` SET `Title` = 'Подмастерье кожевника' WHERE `entry` = 3549 AND `locale` = 'ruRU' AND (NOT (CAST(`Title` AS BINARY) <=> CAST('Подмастерье кожевника' AS BINARY)));
+UPDATE `creature_template_locale` SET `Title` = 'Учительница езды на конях-скелетах' WHERE `entry` = 4773 AND `locale` = 'ruRU' AND (NOT (CAST(`Title` AS BINARY) <=> CAST('Учительница езды на конях-скелетах' AS BINARY)));
+UPDATE `creature_template_locale` SET `Name` = 'Хозяйка таверны Ренни' WHERE `entry` = 5688 AND `locale` = 'ruRU' AND (NOT (CAST(`Name` AS BINARY) <=> CAST('Хозяйка таверны Ренни' AS BINARY)));
+UPDATE `creature_template_locale` SET `Title` = 'Подмастерье зачаровывателя' WHERE `entry` = 5695 AND `locale` = 'ruRU' AND (NOT (CAST(`Title` AS BINARY) <=> CAST('Подмастерье зачаровывателя' AS BINARY)));
+UPDATE `creature_template_locale` SET `Title` = 'Учительница первой помощи' WHERE `entry` = 5759 AND `locale` = 'ruRU' AND (NOT (CAST(`Title` AS BINARY) <=> CAST('Учительница первой помощи' AS BINARY)));
+UPDATE `creature_template_locale` SET `Title` = 'Мастер снятия шкур' WHERE `entry` = 6289 AND `locale` = 'ruRU' AND (NOT (CAST(`Title` AS BINARY) <=> CAST('Мастер снятия шкур' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Розыск!' WHERE `entry` = 711 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Розыск!' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 3797 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 3798 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 3803 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 3804 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Дуэльное знамя' WHERE `entry` = 21680 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Дуэльное знамя' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22563 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22564 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22565 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22566 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22567 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22670 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22671 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22672 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22673 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22674 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22707 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22708 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22709 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22710 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22711 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Уют очага' WHERE `entry` = 22712 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Уют очага' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Ящики с экипировкой' WHERE `entry` = 164662 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Ящики с экипировкой' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'G_Pumpkin_01' WHERE `entry` = 180405 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('G_Pumpkin_01' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'G_Pumpkin_02' WHERE `entry` = 180406 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('G_Pumpkin_02' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'G_Pumpkin_03' WHERE `entry` = 180407 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('G_Pumpkin_03' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'G_HangingSkeleton_01' WHERE `entry` = 180410 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('G_HangingSkeleton_01' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'G_Ghost_01' WHERE `entry` = 180411 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('G_Ghost_01' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'G_CandyBucket_01' WHERE `entry` = 180412 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('G_CandyBucket_01' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'SkullCandle01' WHERE `entry` = 180425 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('SkullCandle01' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Bat01' WHERE `entry` = 180426 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Bat01' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Bat02' WHERE `entry` = 180427 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Bat02' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'G_WitchBroom_01 scale 0.5' WHERE `entry` = 180428 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('G_WitchBroom_01 scale 0.5' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'G_WitchHat_01 scale 0.5' WHERE `entry` = 180429 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('G_WitchHat_01 scale 0.5' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'Ивовый Человек' WHERE `entry` = 180433 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('Ивовый Человек' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'HangingSkullLight01' WHERE `entry` = 180471 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('HangingSkullLight01' AS BINARY)));
+UPDATE `gameobject_template_locale` SET `name` = 'HangingSkullLight02' WHERE `entry` = 180472 AND `locale` = 'ruRU' AND (NOT (CAST(`name` AS BINARY) <=> CAST('HangingSkullLight02' AS BINARY)));
