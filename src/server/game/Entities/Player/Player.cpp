@@ -10231,7 +10231,8 @@ bool Player::SetAmmo(uint32 itemId)
 void Player::AutoSelectAmmo()
 {
     // A bot has no client to choose its ammo: it takes a stack that is drawn with a model, not the generic white-box display.
-    bool const preferDrawable = GetSession() && GetSession()->IsBot();
+    // Ветка forever (хардкор) собирается без ботов, WorldSession::IsBot() здесь нет; в forever-bots-merge строка с IsBot().
+    bool const preferDrawable = false;
     if (uint32 current = GetAmmoId())
         if (HasItemCount(current) && IsAmmoUsableWithRangedWeapon(sObjectMgr->GetItemTemplate(current)) &&
             (!preferDrawable || HasDrawableAmmoDisplay(sObjectMgr->GetItemTemplate(current))))
