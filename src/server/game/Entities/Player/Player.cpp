@@ -6576,7 +6576,7 @@ void Player::SendActionButtons(uint32 state) const
     SendDirectMessage(packet.Write());
 }
 
-bool Player::IsActionButtonDataValid(uint8 button, uint64 action, uint8 type) const
+bool Player::IsActionButtonDataValid(uint16 button, uint64 action, uint8 type) const
 {
     if (button >= MAX_ACTION_BUTTONS)
     {
@@ -6653,7 +6653,7 @@ bool Player::IsActionButtonDataValid(uint8 button, uint64 action, uint8 type) co
     return true;
 }
 
-ActionButton* Player::AddActionButton(uint8 button, uint64 action, uint8 type)
+ActionButton* Player::AddActionButton(uint16 button, uint64 action, uint8 type)
 {
     if (!IsActionButtonDataValid(button, action, type))
         return nullptr;
@@ -6669,7 +6669,7 @@ ActionButton* Player::AddActionButton(uint8 button, uint64 action, uint8 type)
     return &ab;
 }
 
-void Player::RemoveActionButton(uint8 button)
+void Player::RemoveActionButton(uint16 button)
 {
     ActionButtonList::iterator buttonItr = m_actionButtons.find(button);
     if (buttonItr == m_actionButtons.end() || buttonItr->second.uState == ACTIONBUTTON_DELETED)
@@ -6684,7 +6684,7 @@ void Player::RemoveActionButton(uint8 button)
         GetName(), GetGUID().ToString(), button);
 }
 
-ActionButton const* Player::GetActionButton(uint8 button)
+ActionButton const* Player::GetActionButton(uint16 button)
 {
     ActionButtonList::iterator buttonItr = m_actionButtons.find(button);
     if (buttonItr == m_actionButtons.end() || buttonItr->second.uState == ACTIONBUTTON_DELETED)
@@ -19912,7 +19912,7 @@ void Player::_LoadActions(PreparedQueryResult result)
         do
         {
             Field* fields = result->Fetch();
-            uint8 button = fields[0].GetUInt8();
+            uint16 button = fields[0].GetUInt16();
             uint64 action = fields[1].GetUInt64();
             uint8 type = fields[2].GetUInt8();
 
@@ -21850,7 +21850,7 @@ void Player::_SaveActions(CharacterDatabaseTransaction trans)
                 stmt->setUInt64(0, GetGUID().GetCounter());
                 stmt->setUInt8(1, GetActiveTalentGroup());
                 stmt->setInt32(2, traitConfigId);
-                stmt->setUInt8(3, itr->first);
+                stmt->setUInt16(3, itr->first);
                 stmt->setUInt64(4, itr->second.GetAction());
                 stmt->setUInt8(5, uint8(itr->second.GetType()));
                 trans->Append(stmt);
@@ -21863,7 +21863,7 @@ void Player::_SaveActions(CharacterDatabaseTransaction trans)
                 stmt->setUInt64(0, itr->second.GetAction());
                 stmt->setUInt8(1, uint8(itr->second.GetType()));
                 stmt->setUInt64(2, GetGUID().GetCounter());
-                stmt->setUInt8(3, itr->first);
+                stmt->setUInt16(3, itr->first);
                 stmt->setUInt8(4, GetActiveTalentGroup());
                 stmt->setInt32(5, traitConfigId);
                 trans->Append(stmt);
@@ -21874,7 +21874,7 @@ void Player::_SaveActions(CharacterDatabaseTransaction trans)
             case ACTIONBUTTON_DELETED:
                 stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_CHAR_ACTION_BY_BUTTON_SPEC);
                 stmt->setUInt64(0, GetGUID().GetCounter());
-                stmt->setUInt8(1, itr->first);
+                stmt->setUInt16(1, itr->first);
                 stmt->setUInt8(2, GetActiveTalentGroup());
                 stmt->setInt32(3, traitConfigId);
                 trans->Append(stmt);
