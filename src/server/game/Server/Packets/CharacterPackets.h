@@ -312,7 +312,6 @@ namespace WorldPackets
 
             uint32 SequenceIndex = 0;
             std::string Name;
-            std::string Surname;    // Classic 1.60
         };
 
         class CheckCharacterNameAvailabilityResult final : public ServerPacket
@@ -885,9 +884,9 @@ namespace WorldPackets
 
             ObjectGuid Player;
             DeclinedName DeclinedNames;
-            DeclinedName SurnameDeclinedNames; // read to keep the packet aligned, not stored
-            std::string RawHex;  // start of the packet when it could not be read, logged to learn the Classic layout
-            bool Parsed = true; // false when the client sent a layout we cannot read
+            DeclinedName SurnameDeclinedNames; // Classic 1.60: read to keep the packet aligned, not stored
+            bool Parsed = true;     // false when the layout could not be read
+            std::string RawHex;     // start of such a packet, logged to learn its layout
         };
 
         class SetPlayerDeclinedNamesResult final : public ServerPacket

@@ -19,6 +19,8 @@
 #include "Config.h"
 #include "ItemTemplate.h"
 #include "SharedDefines.h"
+#include <algorithm>
+#include <array>
 
 namespace AuctionBotVanilla
 {
@@ -27,6 +29,15 @@ namespace
     bool _enabled = false;
     int32 _maxReqLevel = 60;
     uint32 _maxItemLevel = 100;   // Naxxramas epics top out around 92
+    bool _valueCurve = false;
+
+    // copper per item level squared, by quality (gray .. epic); AuctionHouseBot.Vanilla.ValueCurve.Gray .. .Epic
+    std::array<uint32, 5> QualityFactor = { 1, 2, 15, 50, 150 };
+    // AuctionHouseBot.Vanilla.ValueCurve.Scale: one easy knob over the whole curve (1 = as set, 2 = double, 0.5 = half)
+    float _scale = 1.0f;
+    // AuctionHouseBot.Vanilla.ValueCurve.FullValueItemLevel: below this item level the curve scales down in proportion
+    // (item level / this), so low-level goods are not priced like endgame ones (0 = off)
+    uint32 _fullValueItemLevel = 0;
 }
 
 void LoadConfig()
@@ -34,6 +45,14 @@ void LoadConfig()
     _enabled = sConfigMgr->GetBoolDefault("AuctionHouseBot.Vanilla.Only", false);
     _maxReqLevel = sConfigMgr->GetIntDefault("AuctionHouseBot.Vanilla.MaxReqLevel", 60);
     _maxItemLevel = sConfigMgr->GetIntDefault("AuctionHouseBot.Vanilla.MaxItemLevel", 100);
+    _valueCurve = sConfigMgr->GetBoolDefault("AuctionHouseBot.Vanilla.ValueCurve", false);
+    QualityFactor[0] = sConfigMgr->GetIntDefault("AuctionHouseBot.Vanilla.ValueCurve.Gray", 1);
+    QualityFactor[1] = sConfigMgr->GetIntDefault("AuctionHouseBot.Vanilla.ValueCurve.White", 2);
+    QualityFactor[2] = sConfigMgr->GetIntDefault("AuctionHouseBot.Vanilla.ValueCurve.Green", 15);
+    QualityFactor[3] = sConfigMgr->GetIntDefault("AuctionHouseBot.Vanilla.ValueCurve.Blue", 50);
+    QualityFactor[4] = sConfigMgr->GetIntDefault("AuctionHouseBot.Vanilla.ValueCurve.Epic", 150);
+    _scale = std::clamp(sConfigMgr->GetFloatDefault("AuctionHouseBot.Vanilla.ValueCurve.Scale", 1.0f), 0.1f, 10.0f);
+    _fullValueItemLevel = sConfigMgr->GetIntDefault("AuctionHouseBot.Vanilla.ValueCurve.FullValueItemLevel", 0);
 }
 
 bool Enabled()
@@ -71,5 +90,46 @@ bool IsAllowed(ItemTemplate const* proto)
         return false;
 
     return true;
+}
+
+uint64 UnitValue(ItemTemplate const* proto)
+{
+    if (!_valueCurve)
+        return 0;
+
+    // the 70532 data gives most loot-only goods a token vendor price (enchanting essences and shards: 1 copper),
+    // so the vendor price alone lists them for a few copper
+    uint64 vendor = std::max<uint64>(proto->GetBuyPrice() / std::max<uint32>(1, proto->GetBuyCount()), uint64(proto->GetSellPrice()) * 4);
+    if (proto->GetClass() == ITEM_CLASS_PROJECTILE)
+        vendor = proto->GetBuyPrice() / 200;   // ammo is bought in stacks of 200
+
+    uint32 classPct = 0;
+    switch (proto->GetClass())
+    {
+        case ITEM_CLASS_WEAPON:
+        case ITEM_CLASS_ARMOR:
+        case ITEM_CLASS_CONTAINER:
+        case ITEM_CLASS_TRADE_GOODS:
+            classPct = 100;
+            break;
+        case ITEM_CLASS_RECIPE:
+        case ITEM_CLASS_MISCELLANEOUS:
+            classPct = 50;
+            break;
+        case ITEM_CLASS_CONSUMABLE:
+            classPct = 25;
+            break;
+        default:                        // ammo, reagents, quivers: vendor goods, vendor price
+            break;
+    }
+
+    uint32 quality = std::min<uint32>(proto->GetQuality(), QualityFactor.size() - 1);
+    uint64 itemLevel = proto->GetBaseItemLevel();
+    double curve = double(itemLevel * itemLevel * QualityFactor[quality] * classPct / 100) * _scale;
+    // Squared item level alone priced a level 14 green bracer at 1g (Discord 2026-11-12, dumpins); vanilla houses sold them for
+    // a few tens of silver. Below the full value level the price falls with the item level once more.
+    if (_fullValueItemLevel && itemLevel < _fullValueItemLevel)
+        curve *= double(itemLevel) / double(_fullValueItemLevel);
+    return std::max<uint64>(vendor, uint64(curve));
 }
 }

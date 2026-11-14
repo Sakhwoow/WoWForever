@@ -132,9 +132,10 @@ EnumCharactersResult::CharacterInfoBasic::CharacterInfoBasic(Field const* fields
     if (fields[17].GetUInt64())
         Flags |= CHARACTER_FLAG_LOCKED_BY_BILLING;
 
-    // Classic 1.60 (ruRU) asks for the declension of a Cyrillic name at every login until this flag is set, and its answer is a packet
-    // layout we do not store yet, so the flag is always reported: the declensions are optional and the dialog would only repeat
-    Flags |= CHARACTER_FLAG_DECLINED;
+    // Classic 1.60: the ruRU client asks for the declensions of a Cyrillic name at every login until this flag is set; a realm without
+    // declined names has nothing to ask for
+    if (!sWorld->getBoolConfig(CONFIG_DECLINED_NAMES_USED) || !fields[180].GetStringView().empty())
+        Flags |= CHARACTER_FLAG_DECLINED;
 
     if (atLoginFlags & AT_LOGIN_CUSTOMIZE)
         Flags2 = CHARACTER_FLAG_2_CUSTOMIZE;
@@ -470,13 +471,14 @@ void CheckCharacterNameAvailability::Read()
     _worldPacket >> SequenceIndex;
     // Classic 1.60.1.70009: 6 bit name length, 3 unknown bits, 6 bit surname length, then name and surname data
     // (e.g. "gear" + "fd": 10 04 67656172 6664)
+    std::string surname;
     _worldPacket >> SizedString::BitsSize<6>(Name);
     _worldPacket.ReadBits(3);
-    _worldPacket >> SizedString::BitsSize<6>(Surname);
+    _worldPacket >> SizedString::BitsSize<6>(surname);
     _worldPacket.ResetBitPos();
 
     _worldPacket >> SizedString::Data(Name);
-    _worldPacket >> SizedString::Data(Surname);
+    _worldPacket >> SizedString::Data(surname);
 }
 
 WorldPacket const* CheckCharacterNameAvailabilityResult::Write()
@@ -598,7 +600,7 @@ CharCustomizeSuccess::CharCustomizeSuccess(CharCustomizeInfo const* info)
     CharGUID = info->CharGUID;
     SexID = info->SexID;
     CharName = info->CharName;
-    CharSurname = info->CharSurname;
+    CharSurname = CharacterCache::AreSurnamesEnabled() ? info->CharSurname : std::string();
 }
 
 WorldPacket const* CharCustomizeSuccess::Write()
@@ -928,7 +930,7 @@ void SetPlayerDeclinedNames::Read()
 
     try
     {
-        // Classic 1.60 (captured on 1.60.1.70291): each case carries the name and then the surname, lengths first
+        // Classic 1.60 (captured on 1.60.1.70291 by MAXIMUS): each case carries the name and then the surname, lengths first
         for (uint8 i = 0; i < MAX_DECLINED_NAME_CASES; ++i)
         {
             _worldPacket >> SizedString::BitsSize<7>(DeclinedNames.name[i]);
@@ -940,12 +942,17 @@ void SetPlayerDeclinedNames::Read()
             _worldPacket >> SizedString::Data(DeclinedNames.name[i]);
             _worldPacket >> SizedString::Data(SurnameDeclinedNames.name[i]);
         }
+
+        // a layout that does not use up the packet exactly is not trusted: nothing is saved and the start is logged
+        Parsed = _worldPacket.rpos() == _worldPacket.size();
     }
     catch (ByteBufferException const&)
     {
         Parsed = false;
-        RawHex = Trinity::Impl::ByteArrayToHexStr(static_cast<uint8 const*>(_worldPacket.data()), std::min<size_t>(_worldPacket.size(), 600), false);
     }
+
+    if (!Parsed)
+        RawHex = Trinity::Impl::ByteArrayToHexStr(static_cast<uint8 const*>(_worldPacket.data()), std::min<size_t>(_worldPacket.size(), 600), false);
 }
 
 WorldPacket const * SetPlayerDeclinedNamesResult::Write()

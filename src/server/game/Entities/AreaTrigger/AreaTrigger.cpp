@@ -74,7 +74,7 @@ struct AreaTrigger::MovementUpdateLocalResult
 };
 
 AreaTrigger::AreaTrigger() : WorldObject(false), MapObject(), _spawnId(0), _aurEff(nullptr),
-    _duration(0), _totalDuration(0), _verticesUpdatePreviousRotation(),
+    _duration(0), _totalDuration(0), _verticesUpdatePreviousRotation(0.0f, 0.0f, 0.0f, 0.0f), // not a rotation, so the first UpdatePolygonVertices always fills the vertices
     _isRemoved(false), _reachedDestination(true),
     _areaTriggerCreateProperties(nullptr), _areaTriggerTemplate(nullptr)
 {
@@ -1191,7 +1191,7 @@ void AreaTrigger::UpdatePolygonVertices()
     UF::AreaTriggerPolygon const* shape = m_areaTriggerData->ShapeData.Get<UF::AreaTriggerPolygon>();
 
     // No need to recalculate, orientation didn't change
-    if (_verticesUpdatePreviousRotation == _rotation && shape->VerticesTarget.empty())
+    if (!_polygonVertices.empty() && _verticesUpdatePreviousRotation == _rotation && shape->VerticesTarget.empty())
         return;
 
     _polygonVertices.assign(shape->Vertices.begin(), shape->Vertices.end());
@@ -1399,6 +1399,8 @@ AreaTrigger::MovementUpdateWorldResult AreaTrigger::CalculateWorldPositionAndRot
             if (worldResult.Status == MovementUpdateResult::None)
                 worldResult.Status = MovementUpdateResult::Moved;
         }
+        else // target not in the map yet (aura applied while the unit is being added): start at the creation point
+            worldResult.Position = GetStationaryPosition().GetPositionWithOffset(worldResult.Position);
     }
     else if (TransportBase const* transport = GetTransport())
     {

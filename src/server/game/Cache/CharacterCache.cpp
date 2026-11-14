@@ -17,6 +17,7 @@
 
 #include "CharacterCache.h"
 #include "ArenaTeam.h"
+#include "Config.h"
 #include "DatabaseEnv.h"
 #include "Log.h"
 #include "MiscPackets.h"
@@ -28,7 +29,7 @@
 namespace
 {
     std::unordered_map<ObjectGuid, CharacterCacheEntry> _characterCacheStore;
-    std::unordered_multimap<std::string, CharacterCacheEntry*> _characterCacheByNameStore;
+    std::unordered_map<std::string, CharacterCacheEntry*> _characterCacheByNameStore;
 }
 
 CharacterCache::CharacterCache()
@@ -66,10 +67,17 @@ CharacterCache* CharacterCache::instance()
 * @endcode
 **/
 
+// Classic 1.60: Classic.CharacterSurnames = 0 keeps every character to a single name. The surname the client sends at
+// creation, rename or customize stays in the characters table, but nothing reads it back: character select, name queries,
+// party, guild, who, friends, mail and death recap all take the surname from this cache, so they show the name alone
+bool CharacterCache::AreSurnamesEnabled()
+{
+    return sConfigMgr->GetBoolDefault("Classic.CharacterSurnames", true);
+}
+
 void CharacterCache::LoadCharacterCacheStorage()
 {
     _characterCacheStore.clear();
-    _characterCacheByNameStore.clear();
     uint32 oldMSTime = getMSTime();
 
     QueryResult result = CharacterDatabase.Query("SELECT guid, name, account, race, gender, class, level, deleteDate, surname FROM characters");
@@ -79,12 +87,14 @@ void CharacterCache::LoadCharacterCacheStorage()
         return;
     }
 
+    bool const surnamesEnabled = AreSurnamesEnabled();
     do
     {
         Field* fields = result->Fetch();
         AddCharacterCacheEntry(ObjectGuid::Create<HighGuid::Player>(fields[0].GetUInt64()) /*guid*/, fields[2].GetUInt32() /*account*/, fields[1].GetString() /*name*/,
             fields[4].GetUInt8() /*gender*/, fields[3].GetUInt8() /*race*/, fields[5].GetUInt8() /*class*/, fields[6].GetUInt8() /*level*/, fields[7].GetUInt32() != 0);
-        _characterCacheStore[ObjectGuid::Create<HighGuid::Player>(fields[0].GetUInt64())].Surname = fields[8].GetString();
+        if (surnamesEnabled)
+            _characterCacheStore[ObjectGuid::Create<HighGuid::Player>(fields[0].GetUInt64())].Surname = fields[8].GetString();
     } while (result->NextRow());
 
     TC_LOG_INFO("server.loading", "Loaded character infos for {} characters in {} ms", _characterCacheStore.size(), GetMSTimeDiffToNow(oldMSTime));
@@ -96,7 +106,6 @@ Modifying functions
 void CharacterCache::AddCharacterCacheEntry(ObjectGuid const& guid, uint32 accountId, std::string const& name, uint8 gender, uint8 race, uint8 playerClass, uint8 level, bool isDeleted)
 {
     CharacterCacheEntry& data = _characterCacheStore[guid];
-    RemoveFromNameStore(data.Name, &data);  // re-adding an existing guid must not leave a stale name entry behind
     data.Guid = guid;
     data.Name = name;
     data.AccountId = accountId;
@@ -111,38 +120,14 @@ void CharacterCache::AddCharacterCacheEntry(ObjectGuid const& guid, uint32 accou
 
     // Fill Name to Guid Store
     if (!isDeleted)
-        AddToNameStore(name, &data);
-}
-
-void CharacterCache::AddToNameStore(std::string const& name, CharacterCacheEntry* entry)
-{
-    // never register the same entry twice under one name
-    auto range = _characterCacheByNameStore.equal_range(name);
-    for (auto itr = range.first; itr != range.second; ++itr)
-        if (itr->second == entry)
-            return;
-
-    _characterCacheByNameStore.emplace(name, entry);
-}
-
-void CharacterCache::RemoveFromNameStore(std::string const& name, CharacterCacheEntry const* entry)
-{
-    auto range = _characterCacheByNameStore.equal_range(name);
-    for (auto itr = range.first; itr != range.second; ++itr)
-    {
-        if (itr->second == entry)
-        {
-            _characterCacheByNameStore.erase(itr);
-            return;
-        }
-    }
+        _characterCacheByNameStore[name] = &data;
 }
 
 void CharacterCache::UpdateCharacterSurname(ObjectGuid const& guid, std::string const& surname)
 {
     auto itr = _characterCacheStore.find(guid);
     if (itr != _characterCacheStore.end())
-        itr->second.Surname = surname;
+        itr->second.Surname = AreSurnamesEnabled() ? surname : std::string();
 }
 
 std::string CharacterCache::GetCharacterSurnameByGuid(ObjectGuid guid) const
@@ -151,12 +136,10 @@ std::string CharacterCache::GetCharacterSurnameByGuid(ObjectGuid guid) const
     return itr != _characterCacheStore.end() ? itr->second.Surname : std::string();
 }
 
-void CharacterCache::DeleteCharacterCacheEntry(ObjectGuid const& guid, std::string const& /*name*/)
+void CharacterCache::DeleteCharacterCacheEntry(ObjectGuid const& guid, std::string const& name)
 {
-    auto itr = _characterCacheStore.find(guid);
-    if (itr != _characterCacheStore.end())
-        RemoveFromNameStore(itr->second.Name, &itr->second);  // use the stored name, never trust the caller's
     _characterCacheStore.erase(guid);
+    _characterCacheByNameStore.erase(name);
 }
 
 void CharacterCache::UpdateCharacterData(ObjectGuid const& guid, std::string const& name, Optional<uint8> gender /*= {}*/, Optional<uint8> race /*= {}*/)
@@ -179,8 +162,8 @@ void CharacterCache::UpdateCharacterData(ObjectGuid const& guid, std::string con
     sWorld->SendGlobalMessage(invalidatePlayer.Write());
 
     // Correct name -> pointer storage
-    RemoveFromNameStore(oldName, &itr->second);
-    AddToNameStore(name, &itr->second);
+    _characterCacheByNameStore.erase(oldName);
+    _characterCacheByNameStore[name] = &itr->second;
 }
 
 void CharacterCache::UpdateCharacterGender(ObjectGuid const& guid, uint8 gender)
@@ -236,9 +219,9 @@ void CharacterCache::UpdateCharacterInfoDeleted(ObjectGuid const& guid, bool del
         return;
 
     if (deleted)
-        RemoveFromNameStore(itr->second.Name, &itr->second);
+        _characterCacheByNameStore.erase(itr->second.Name);
     else
-        AddToNameStore(name, &itr->second);
+        _characterCacheByNameStore[name] = &itr->second;
 
     itr->second.Name = name;
     itr->second.IsDeleted = deleted;
@@ -266,16 +249,6 @@ CharacterCacheEntry const* CharacterCache::GetCharacterCacheByName(std::string c
     auto itr = _characterCacheByNameStore.find(name);
     if (itr != _characterCacheByNameStore.end())
         return itr->second;
-
-    return nullptr;
-}
-
-CharacterCacheEntry const* CharacterCache::GetCharacterCacheByFullName(std::string const& name, std::string const& surname) const
-{
-    auto range = _characterCacheByNameStore.equal_range(name);
-    for (auto itr = range.first; itr != range.second; ++itr)
-        if (StringEqualI(itr->second->Surname, surname))
-            return itr->second;
 
     return nullptr;
 }

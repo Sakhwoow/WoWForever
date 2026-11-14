@@ -18,6 +18,7 @@
 #include "TransmogMgr.h"
 #include "DB2Stores.h"
 #include "FlatSet.h"
+#include "Log.h"
 #include "MapUtils.h"
 #include "ObjectMgr.h"
 #include "Player.h"
@@ -85,6 +86,22 @@ constexpr bool IsArtifactTransmogOutfitSlotOption(TransmogOutfitSlotOption optio
         || option == TransmogOutfitSlotOption::ArtifactSpecTwo
         || option == TransmogOutfitSlotOption::ArtifactSpecThree
         || option == TransmogOutfitSlotOption::ArtifactSpecFour;
+}
+
+// Classic 1.60: armor slots keep one appearance per armor type (options 12-15 of TransmogOutfitSlotOption.db2)
+constexpr bool IsArmorTransmogOutfitSlotOption(TransmogOutfitSlotOption option)
+{
+    return option == TransmogOutfitSlotOption::ArmorCloth
+        || option == TransmogOutfitSlotOption::ArmorLeather
+        || option == TransmogOutfitSlotOption::ArmorMail
+        || option == TransmogOutfitSlotOption::ArmorPlate;
+}
+
+// cosmetic pieces and the hidden appearances (miscellaneous armor) are not tied to one armor type
+bool IsAnyArmorTypeAppearance(ItemTemplate const* item)
+{
+    return item->GetClass() == ITEM_CLASS_ARMOR
+        && (item->GetSubClass() == ITEM_SUBCLASS_ARMOR_COSMETIC || item->GetSubClass() == ITEM_SUBCLASS_ARMOR_MISCELLANEOUS);
 }
 
 bool IsValidTransmogOutfitSlotForItem(ItemTemplate const* item, TransmogOutfitSlot slot, TransmogOutfitSlotOption option)
@@ -249,6 +266,13 @@ void TransmogMgr::Load()
     for (TransmogSituationEntry const* transmogSituation : sTransmogSituationStore)
         if (transmogSituation->HasFlag(TransmogSituationFlags::DefaultsToOn))
             DefaultSituations.push_back(transmogSituation);
+
+    // The client sends one entry per slot and slot option when an outfit is saved; a list longer than the packet allows is
+    // refused whole, so a client with more slots than this needs MAX_TRANSMOG_OUTFIT_SLOTS raised.
+    if (AllSlots.size() > WorldPackets::Transmogrification::TransmogOutfitUpdateSlots::MAX_TRANSMOG_OUTFIT_SLOTS)
+        TC_LOG_ERROR("server.loading", "TransmogOutfitSlotInfo.db2 and TransmogOutfitSlotOption.db2 give {} outfit slots, but "
+            "CMSG_TRANSMOG_OUTFIT_UPDATE_SLOTS accepts {}: outfits with every slot cannot be saved.",
+            AllSlots.size(), uint32(WorldPackets::Transmogrification::TransmogOutfitUpdateSlots::MAX_TRANSMOG_OUTFIT_SLOTS));
 }
 
 ItemModifiedAppearanceEntry const* TransmogMgr::GetItemModifiedAppearance(uint32 itemId, uint32 appearanceModId)
@@ -432,7 +456,8 @@ bool TransmogMgr::ValidateSlots(std::span<WorldPackets::Transmogrification::Tran
             TransmogOutfitSlotOption appearanceSlotOption = itemTemplate->GetWeaponTransmogOutfitSlotOption();
             if (appearanceSlotOption != slot.SlotOption
                 && (slot.SlotOption != TransmogOutfitSlotOption::FuryTwoHandedWeapon
-                    || appearanceSlotOption != TransmogOutfitSlotOption::TwoHandedWeapon))
+                    || appearanceSlotOption != TransmogOutfitSlotOption::TwoHandedWeapon)
+                && (!IsArmorTransmogOutfitSlotOption(slot.SlotOption) || !IsAnyArmorTypeAppearance(itemTemplate)))
                 return false;
 
             if (slot.SheatheCategory != TransmogOutfitSlotOptionSheatheCategory::Default &&
