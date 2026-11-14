@@ -19,6 +19,7 @@
 #include "BattlefieldMgr.h"
 #include "CellImpl.h"
 #include "CinematicMgr.h"
+#include "ClassicLegacyPerks.h"
 #include "CombatLogPackets.h"
 #include "Corpse.h"
 #include "CreatureGroups.h"
@@ -1801,6 +1802,11 @@ int32 WorldObject::ModSpellDuration(SpellInfo const* spellInfo, WorldObject cons
             if (std::ranges::find(CampBenefitSpells, spellInfo->Id) != std::end(CampBenefitSpells))
                 if (int32 pct = targetPlayer->GetClassicLegacyPerkAmount(1225502, EFFECT_1))
                     AddPct(duration, pct);
+
+            // Conquering Hero 1225506: "Beneficial effects you gain from celebrating the defeat of bosses gain $s1% increased duration."
+            if (ClassicLegacyPerks::IsBossCelebrationBuff(spellInfo->Id))
+                if (int32 pct = targetPlayer->GetClassicLegacyPerkAmount(ClassicLegacyPerks::CONQUERING_HERO, EFFECT_0))
+                    AddPct(duration, pct);
         }
 
         // Permanence 1225502 EFFECT_0: class abilities granting long-duration stat or attribute benefits to party / raid members
@@ -2025,6 +2031,12 @@ SpellMissInfo WorldObject::SpellHitResult(Unit* victim, SpellInfo const* spellIn
 
     if (spellInfo->HasAttribute(SPELL_ATTR3_ALWAYS_HIT))
         return SPELL_MISS_NONE;
+
+    // A playerbot raid tank's taunt lands (ThreatManager::SetTauntNeverMisses): immunity and reflect above still apply.
+    if (Unit const* caster = ToUnit())
+        if (caster->GetThreatManager().GetTauntNeverMisses() &&
+            (spellInfo->HasAura(SPELL_AURA_MOD_TAUNT) || spellInfo->HasEffect(SPELL_EFFECT_ATTACK_ME)))
+            return SPELL_MISS_NONE;
 
     switch (spellInfo->DmgClass)
     {

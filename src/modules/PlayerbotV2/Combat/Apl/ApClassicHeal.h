@@ -94,6 +94,7 @@ constexpr float kDispelRange    = 30.0f;
 constexpr float kMeleeReach     = 8.0f;    // enemy-to-member distance that counts as "swinging at"
 constexpr int32 kEmergencyPct   = 35;      // HEAL_DOWNRANK_MIN_PCT / LOS exemption
 constexpr int32 kAlmostFullPct  = 90;      // AiPlayerbot.AlmostFullHealth
+constexpr int32 kPetHealPct     = 60;      // a group member's pet becomes a heal candidate under this (PickPatient pet case)
 constexpr int32 kHealGroupStayPct = 50;    // a triage healer leaves its subgroups for an emergency only while its own best patient is at or above this
 constexpr int32 kMediumPct      = 70;      // AiPlayerbot.MediumHealth (AoE heal trigger)
 constexpr int32 kLowManaPct     = 30;      // no top-up heals below this
@@ -141,10 +142,11 @@ inline int32 ManaPct(BotSnapshotView const& s)
 }
 
 // The mana-efficiency rules apply (see the header comment): any group inside a raid or 5-man instance map
-// (Bot/ClassicHealScope.h). The name is the older "raid" one.
+// (Bot/ClassicHealScope.h), and a raid group anywhere: five healers of the support scorecard on open ground (230) played by the plain
+// rules, every one rolling Renew on every raider a pulse hit (57% overheal, the holy priest out of mana). The name is the older "raid" one.
 inline bool RaidHealing(BotSnapshotView const& s)
 {
-    return EfficiencyRulesApply(s.is_in_raid(), s.is_in_dungeon(), s.in_battleground(), IsVanillaRealm());
+    return EfficiencyRulesApply(s.raid_rules(), s.is_in_dungeon(), s.in_battleground(), IsVanillaRealm());
 }
 
 // Playerbot.Behavior.HealClaims (default on): the raid in-flight heal dedupe, the HoT claims and
@@ -294,9 +296,15 @@ inline Patient PatientFor(BotSnapshotView const& s, GroupSnapshotView const& g, 
     if (guid.IsEmpty() || guid == s.guid())
         return SelfPatient(s, g);
     if (auto const* members = g.members())
+    {
         for (GroupMemberSummary const& m : *members)
             if (m.guid == guid)
                 return MakePatient(s, m.guid, m.hp, m.max_hp, m.x, m.y, m.z, IsTank(s, m));
+        // A member's pet (PickPatient pet case).
+        for (GroupMemberSummary const& m : *members)
+            if (m.pet_alive && m.pet_guid == guid)
+                return MakePatient(s, m.pet_guid, m.pet_hp, m.pet_max_hp, m.pet_x, m.pet_y, m.pet_z, false);
+    }
     return {};
 }
 
@@ -601,9 +609,14 @@ inline Patient PickPatient(BotSnapshotView const& s, GroupSnapshotView const& g,
     HealClaims const claims = raid ? CopyHealClaims(s.published_at_ms()) : HealClaims{};
     bool const opening_hold = raid && (TankOpeningOnBoss(s) || HealerNearTankThreat(s));
     int32 const stand_down_pct = raid ? HealerStandDownPatientPct(s, g) : kHealerNoStandDown;
+    // The owner's "focus heal <names>": only those players and the healer itself are patients (the emitter refuses the rest).
+    std::vector<ObjectGuid> const& heal_only = s.raw().heal_only;
+    auto const focus_heal_skips = [&](ObjectGuid guid)
+    { return !heal_only.empty() && guid != s.guid() && std::find(heal_only.begin(), heal_only.end(), guid) == heal_only.end(); };
     auto consider = [&](Patient const& raw, bool assigned, bool own = false)
     {
         if (!raw.valid || raw.max_hp <= 0) return;
+        if (focus_heal_skips(raw.guid)) return;
         Patient p = raw;
         if (opening_hold && !raw.tank && raw.actual_pct >= kHealOpeningHoldPct) return;
         if (raw.actual_pct >= stand_down_pct) return;
@@ -664,7 +677,8 @@ inline Patient PickPatient(BotSnapshotView const& s, GroupSnapshotView const& g,
                 consider(SelfPatient(s, g), focus == m.guid, HealGroupHas(own_groups, m.subgroup));
                 continue;
             }
-            if (!m.online || !m.is_alive || m.max_hp <= 0 || m.map_id != s.map_id()) continue;
+            // A member at 0 health is no patient either (as a pet at 0 health, GroupSnapshotBuilder pet_alive): no heal lands on it.
+            if (!m.online || !m.is_alive || m.hp <= 0 || m.max_hp <= 0 || m.map_id != s.map_id()) continue;
             if (Dist2(m.x, m.y, m.z, bx, by, bz) > range * range) continue;
             bool const tank = IsTank(s, m);
             int32 const pct = m.hp_pct();
@@ -674,6 +688,17 @@ inline Patient PickPatient(BotSnapshotView const& s, GroupSnapshotView const& g,
             if (raid && LifeTapSkip(m.cls == CLASS_WARLOCK, tank, mp.actual_pct, mp.incoming))
                 continue;
             consider(mp, focus == m.guid, HealGroupHas(own_groups, m.subgroup));
+        }
+        // Pets (hunter, warlock): healed like a non-tank member, but only once they are under kPetHealPct, so a pet never
+        // outbids a player above that line and the raid healers' mana rules (opening hold, stand-down) apply to it the same way.
+        // No line-of-sight test: pets are not in the healer's nearby-friends list, and a pet this low is worth the walk.
+        for (GroupMemberSummary const& m : *members)
+        {
+            if (!m.online || !m.pet_alive || m.pet_guid.IsEmpty() || m.pet_max_hp <= 0 || m.map_id != s.map_id()) continue;
+            if (Dist2(m.pet_x, m.pet_y, m.pet_z, bx, by, bz) > range * range) continue;
+            if (int64(m.pet_hp) * 100 / m.pet_max_hp >= kPetHealPct) continue;
+            consider(MakePatient(s, m.pet_guid, m.pet_hp, m.pet_max_hp, m.pet_x, m.pet_y, m.pet_z, false), false,
+                     HealGroupHas(own_groups, m.subgroup));
         }
     }
     if (!self_seen)
@@ -1396,6 +1421,23 @@ inline void DoAssignedDispel(ApPredicateContext const& ctx, BotIntentEmitter& e)
     }
 }
 
+// A member taken out of the fight by a debuff this bot can remove (Classic::PickControlDispel): before the heals.
+inline bool ShouldControlDispel(ApPredicateContext const& ctx)
+{
+    if (ctx.bot.is_casting())
+        return false;
+    return Classic::PickControlDispel(ctx.bot, ctx.group, { &DispelRecently, &ctx.bot }).spell != 0;
+}
+inline void DoControlDispel(ApPredicateContext const& ctx, BotIntentEmitter& e)
+{
+    Classic::CastPick const d = Classic::PickControlDispel(ctx.bot, ctx.group, { &DispelRecently, &ctx.bot });
+    if (d.spell && e.cast(d.spell, d.target))
+    {
+        WithHealTiming(ctx.bot, [&](HealTiming& t) { t.dispel_key = d.key; t.dispel_ms = ctx.bot.published_at_ms(); return 0; });
+        Classic::NoteRaidSupport(Classic::RaidSupportKind::Dispel, ctx.bot.map_id());
+    }
+}
+
 // [raid_heal] spell / rank change: the exact rank this bot casts differs from
 // the one it last logged (per bot, at most one line per 5 s).
 inline void NoteHealChoice(BotSnapshotView const& s, uint32 spell, Patient const& p, HealPlan const& plan)
@@ -1427,18 +1469,32 @@ inline void NoteHealChoice(BotSnapshotView const& s, uint32 spell, Patient const
         plan.want, plan.est, ManaPct(s));
 }
 
-// The flat mana cost of the spell (talent discounts ignored, as is_ready does for rage and energy): a heal the healer cannot pay is
-// refused by the core with NO_POWER; sending it keeps the healer casting at nothing instead of the rules that can still help.
-// Percent-of-base-mana costs are not in the snapshot and count as affordable.
+// The mana cost of the spell (talent discounts ignored, as is_ready does): a heal the healer cannot pay is refused by the core with NO_POWER;
+// sending it keeps the healer casting at nothing instead of the rules that can still help. Percent-of-base-mana costs count (the snapshot
+// carries the base mana; BotSnapshotView::mana_cost converts them): the flat-only check let the shaman and druid heal ranks priced in percent
+// through at 5 % mana.
 inline bool CanPayMana(BotSnapshotView const& s, uint32 spell_id)
 {
-    SpellInfo const* si = sSpellMgr->GetSpellInfo(spell_id, DIFFICULTY_NONE);
-    if (!si)
-        return true;
-    for (SpellPowerEntry const* pw : si->PowerCosts)
-        if (pw && pw->PowerType == POWER_MANA && pw->ManaCost > 0 && !pw->RequiredAuraSpellID && s.power(POWER_MANA) < pw->ManaCost)
-            return false;
-    return true;
+    int32 const cost = s.mana_cost(spell_id);
+    return cost <= 0 || s.power(POWER_MANA) >= cost;
+}
+
+// The planned rank when the healer can pay it, else the highest known rank below it that it can (a healer at low mana downranks instead of
+// sending a cast the core refuses with NO_POWER); 0 when no rank is payable.
+inline uint32 AffordableRank(BotSnapshotView const& s, uint32 spell, uint32 planned)
+{
+    uint32 const want = planned ? planned : s.resolve_rank(spell);
+    if (!want || CanPayMana(s, want))
+        return want;
+    uint32 best = 0;
+    for (uint32 const r : s.known_ranks(spell))
+    {
+        if (r == want)
+            break;
+        if (CanPayMana(s, r))
+            best = r;   // ranks ascend: the last payable one below the wanted rank is the highest
+    }
+    return best;
 }
 
 inline bool PayableOrLog(BotSnapshotView const& s, uint32 spell_id, Patient const& p)
@@ -1472,11 +1528,19 @@ inline bool EmitHeal(BotSnapshotView const& s, GroupSnapshotView const& g, BotIn
     ObjectGuid const target = p.guid.IsEmpty() ? s.guid() : p.guid;
     if (!RaidHealing(s) || !HealClaimsOn())
     {
-        HealPlan const plan = PlanHeal(s, g, spell, p);
+        HealPlan plan = PlanHeal(s, g, spell, p);
         if (plan.skip)
             return false;
-        if (RaidHealing(s) && !PayableOrLog(s, plan.rank ? plan.rank : s.resolve_rank(spell), p))
-            return false;
+        if (uint32 const afford = AffordableRank(s, spell, plan.rank); afford != (plan.rank ? plan.rank : s.resolve_rank(spell)))
+        {
+            if (!afford)
+            {
+                PayableOrLog(s, plan.rank ? plan.rank : s.resolve_rank(spell), p);   // logs the refusal
+                return false;
+            }
+            plan.rank = afford;
+            plan.est = ExpectedHeal(sSpellMgr->GetSpellInfo(afford, DIFFICULTY_NONE), s);
+        }
         bool const sent = plan.rank ? e.cast_rank(plan.rank, target) : e.cast(spell, target);
         if (sent && RaidHealing(s))
         {
@@ -1504,11 +1568,19 @@ inline bool EmitHeal(BotSnapshotView const& s, GroupSnapshotView const& g, BotIn
                 return false;
             }
         }
-        HealPlan const plan = PlanHeal(s, g, spell, q);
+        HealPlan plan = PlanHeal(s, g, spell, q);
         if (plan.skip)
             return false;
-        if (!PayableOrLog(s, plan.rank ? plan.rank : s.resolve_rank(spell), q))
-            return false;
+        if (uint32 const afford = AffordableRank(s, spell, plan.rank); afford != (plan.rank ? plan.rank : s.resolve_rank(spell)))
+        {
+            if (!afford)
+            {
+                PayableOrLog(s, plan.rank ? plan.rank : s.resolve_rank(spell), q);   // logs the refusal
+                return false;
+            }
+            plan.rank = afford;
+            plan.est = ExpectedHeal(sSpellMgr->GetSpellInfo(afford, DIFFICULTY_NONE), s);
+        }
         bool const sent = plan.rank ? e.cast_rank(plan.rank, target) : e.cast(spell, target);
         if (!sent)
             return false;

@@ -1,5 +1,6 @@
 #include "NearestNode3D.h"
 #include "UnifiedTravelGraph.h"
+#include "EntrancePockets.h"
 
 #include "PlayerbotMovement.h"   // SehSafeCalculatePath (tile-race guard)
 #include "PortalIndex.h"
@@ -23,6 +24,8 @@
 #include "Player.h"
 #include "UnitDefines.h"
 #include "Travel/WalkLinkTable.h"
+#include "Travel/TransportWaitMemory.h"
+#include "GameTime.h"
 
 #include <algorithm>
 #include <iterator>
@@ -74,6 +77,7 @@ constexpr float kTransitMapPenalty = 600.0f;
 // the navmesh can't realize. ConnectIslands() patches the longer hops
 // via Bridge nodes.
 constexpr float kMaxWalkEdgeYds = 600.0f;
+constexpr float kFarAttachYds   = 1500.0f;   // reach for a source or goal with no node inside kMaxWalkEdgeYds
 // Max vertical gap a same-map walk edge may span. Above this the only routable
 // path between the two floors is an EdgeKind::Elevator edge (see BuildWalkEdges).
 // 18y: an elevated FM (z~103) still links to the lift's TOP stop (z~90, dz 13)
@@ -333,7 +337,23 @@ void UnifiedTravelGraph::LoadDungeonEntries()
     // false when no entrance is defined (GM-only maps). We register
     // the entry on the PARENT map so ground travel + flights can
     // route to it; the area-trigger handles the actual teleport.
-    uint32 added = 0;
+    uint32 added = 0, with_height = 0;
+    // The map entry gives x and y only. The walk-in triggers that lead into the instance carry the height: without it every
+    // entrance node sat at z 0 and a bot walking to one asked for (-8349,517,0) in Stormwind, 90 y below the city
+    // floor (soak 127: Haim, 53 asks in 13 minutes, a path failure each time).
+    struct EntranceTrigger { uint32 parent_map; float x, y, z; };
+    std::unordered_map<uint32, std::vector<EntranceTrigger>> entrance_triggers;   // instance map id -> triggers into it
+    if (QueryResult res = WorldDatabase.Query("SELECT ID FROM areatrigger_teleport"))
+    {
+        do
+        {
+            uint32 const trigger_id = (*res)[0].GetUInt32();
+            AreaTriggerEntry const* at = sAreaTriggerStore.LookupEntry(trigger_id);
+            WorldSafeLocsEntry const* dest = at ? sObjectMgr->GetAreaTrigger(trigger_id) : nullptr;
+            if (dest && dest->Loc.GetMapId() != at->ContinentID)
+                entrance_triggers[dest->Loc.GetMapId()].push_back({ at->ContinentID, at->Pos.X, at->Pos.Y, at->Pos.Z });
+        } while (res->NextRow());
+    }
     for (MapEntry const* me : sMapStore)
     {
         if (!me) continue;
@@ -344,19 +364,33 @@ void UnifiedTravelGraph::LoadDungeonEntries()
             continue;
         if (parent_map < 0) continue;
 
+        float ez = 0.f;
+        {
+            constexpr float kMaxTriggerYds = 150.f;
+            float best = kMaxTriggerYds * kMaxTriggerYds;
+            if (auto it = entrance_triggers.find(me->ID); it != entrance_triggers.end())
+                for (EntranceTrigger const& t : it->second)
+                {
+                    if (t.parent_map != uint32(parent_map)) continue;
+                    float const d2 = (t.x - ex) * (t.x - ex) + (t.y - ey) * (t.y - ey);
+                    if (d2 < best) { best = d2; ez = t.z; }
+                }
+            if (ez != 0.f) ++with_height;
+        }
+
         GraphNode n;
         n.kind        = NodeKind::DungeonEntry;
         n.map_id      = uint32(parent_map);
         n.x           = ex;
         n.y           = ey;
-        n.z           = 0.f;
+        n.z           = ez;
         char const* map_name = me->MapName[LOCALE_enUS];
         n.name        = std::string("Entrance to ") + (map_name ? map_name : "?");
         n.payload_id  = me->ID;
         AppendNode(std::move(n));
         ++added;
     }
-    TC_LOG_INFO("playerbot.v2", "[UnifiedTravelGraph] LoadDungeonEntries: {} nodes", added);
+    TC_LOG_INFO("playerbot.v2", "[UnifiedTravelGraph] LoadDungeonEntries: {} nodes, {} with the height of their walk-in trigger", added, with_height);
 }
 
 void UnifiedTravelGraph::LoadAreaTriggerTeleports()
@@ -1048,10 +1082,12 @@ void UnifiedTravelGraph::LogWalkGaps() const
         // Candidate links for the offline navmesh check (src/tools/walk_link_check): per pair of pieces the closest pair of real places
         // (flight master, quest hub, capital) on the same landmass, up to kLinkCandidateYds apart. One line each, with the heights.
         {
-            // On the Classic 1.60 maps every node is tried (their docks and hubs are all there is); elsewhere only the real places.
+            // On the Classic 1.60 maps every node is tried (their docks and hubs are all there is); elsewhere only the real places and
+            // the dungeon entrances (an entrance left out here never got a checked link: Scholomance and the Ahn'Qiraj gates).
             bool const forever = map_id >= kForeverMapFrom;
             auto const isPlace = [forever](GraphNode const& n)
-            { return forever || n.kind == NodeKind::FlightMaster || n.kind == NodeKind::QuestHub || n.kind == NodeKind::Capital; };
+            { return forever || n.kind == NodeKind::FlightMaster || n.kind == NodeKind::QuestHub || n.kind == NodeKind::Capital
+                  || n.kind == NodeKind::DungeonEntry; };
             struct Cand { size_t i, j; float d; };
             std::map<std::pair<size_t, size_t>, Cand> best_pair;
             for (size_t i = 0; i < ids.size(); ++i)
@@ -1140,6 +1176,45 @@ void UnifiedTravelGraph::ConnectIslands()
         for (auto const& e : _adj[i])
             if (e.kind == EdgeKind::Walk) { has_walk[i] = true; break; }
 
+    // Dungeon entrances in walk pieces of entrances only (EntrancePockets.h): Scholomance on Caer Darrow, the two Ahn'Qiraj gates.
+    std::vector<bool> pocket;
+    {
+        std::vector<bool> is_entrance(original_n, false);
+        std::vector<std::pair<size_t, size_t>> walk_edges;
+        for (NodeId i = 0; i < original_n; ++i)
+        {
+            is_entrance[i] = _nodes[i].kind == NodeKind::DungeonEntry;
+            if (i < _adj.size())
+                for (auto const& e : _adj[i])
+                    if (e.kind == EdgeKind::Walk && e.to < original_n && e.to > i)
+                        walk_edges.emplace_back(size_t(i), size_t(e.to));
+        }
+        pocket = FindEntrancePockets(is_entrance, walk_edges);
+    }
+    uint32 dead_ends = 0;
+    for (NodeId i = 0; i < original_n; ++i)
+    {
+        if (!pocket[i]) continue;
+        GraphNode& src = _nodes[i];
+        if (src.map_id >= kForeverMapFrom) continue;
+        auto it = _nodes_by_map.find(src.map_id);
+        if (it == _nodes_by_map.end()) continue;
+        const uint32 src_region = RegionForPosition(src.map_id, src.x, src.y);
+        float nearest_real = std::numeric_limits<float>::max();
+        for (NodeId cand : it->second)
+        {
+            if (cand >= original_n || pocket[cand]) continue;
+            if (RegionForPosition(src.map_id, _nodes[cand].x, _nodes[cand].y) != src_region) continue;
+            nearest_real = std::min(nearest_real, Dist2D(src.x, src.y, _nodes[cand].x, _nodes[cand].y));
+        }
+        if (KeepIslandBridge(true, nearest_real, kFarAttachYds))
+            continue;
+        src.dead_end_entrance = true;
+        ++dead_ends;
+        TC_LOG_INFO("playerbot.v2", "[walk_gaps] '{}' ({:.0f},{:.0f},{:.0f}) map {}: no walk link to a real place (nearest {:.0f} y); "
+                    "routes to it attach to the places around it and walk the last stretch", src.name, src.x, src.y, src.z, src.map_id, nearest_real);
+    }
+
     uint32 bridges_added = 0;
     for (NodeId i = 0; i < original_n; ++i)
     {
@@ -1147,6 +1222,9 @@ void UnifiedTravelGraph::ConnectIslands()
         // Find the closest other node on the same map.
         GraphNode const& src = _nodes[i];
         if (src.map_id >= kForeverMapFrom) continue;   // no unchecked bridge on the Classic 1.60 maps (see kForeverMapFrom)
+        // A pocket entrance a real place can serve gets no straight-line bridge: the nearest node by straight line can lie over a
+        // mountain (Scholomance -> Aerie Peak, 1,133 y over the Alterac foothills).
+        if (src.dead_end_entrance) continue;
         auto it = _nodes_by_map.find(src.map_id);
         if (it == _nodes_by_map.end()) continue;
         NodeId best = INVALID_NODE_ID;
@@ -1155,6 +1233,7 @@ void UnifiedTravelGraph::ConnectIslands()
         for (NodeId cand : it->second)
         {
             if (cand == i) continue;
+            if (_nodes[cand].dead_end_entrance) continue;   // a bridge into a pocket entrance leads nowhere on foot
             // Same landmass only (a bridge across the Teldrassil strait would be
             // a walk edge through the sea).
             if (RegionForPosition(src.map_id, _nodes[cand].x, _nodes[cand].y) != src_region)
@@ -1179,8 +1258,8 @@ void UnifiedTravelGraph::ConnectIslands()
         AddEdge(best, GraphEdge{bid,  EdgeKind::Walk, half, 0, 0});
         ++bridges_added;
     }
-    TC_LOG_INFO("playerbot.v2", "[UnifiedTravelGraph] ConnectIslands: {} bridge nodes added",
-                bridges_added);
+    TC_LOG_INFO("playerbot.v2", "[UnifiedTravelGraph] ConnectIslands: {} bridge nodes added, {} dungeon entrances reached by far attach",
+                bridges_added, dead_ends);
 }
 
 // ---------------------------------------------------------------- Read API
@@ -1280,6 +1359,10 @@ bool EdgeUsable(Player const* bot,
                 bool allow_hearth)
 {
     if (!allow_hearth && edge.kind == EdgeKind::Hearth) return false;
+    // A same-map ride that bots waited for in vain (Travel/TransportWaitMemory.h) is left out of the routes for a while.
+    if (edge.kind == EdgeKind::Ship && edge.payload_id != 0 &&
+        TransportWaitMemory::Instance().Unusable(edge.payload_id, GameTime::GetGameTimeMS()))
+        return false;
     // Source-node faction gate: flight masters / portals tagged Alliance
     // or Horde aren't usable by the opposing team. Neutral (faction=0)
     // is fine for anyone.
@@ -1468,14 +1551,22 @@ Route UnifiedTravelGraph::FindRoute(RouteRequest const& req) const
         // the attach and the walk leg NoPathed forever instead of riding the lift.
         std::vector<std::pair<float, NodeId>> cand;   // (attach_cost, node)
         const uint32 from_region = RegionForPosition(req.from_map, req.from_x, req.from_y);
-        for (NodeId nid : it->second)
+        // A bot far from every node (Burning Steppes: the nearest flight master is 700-900 y away) found no attach within the walk
+        // limit, and the route failed with from_attach=0 for the whole zone (soak 127). With none inside it, the search reaches out
+        // to kFarAttachYds; the bot walks to the nearest node and the rest of the route is the usual one.
+        for (float const radius : { kMaxWalkEdgeYds, kFarAttachYds })
         {
-            const float d = Dist2D(req.from_x, req.from_y, _nodes[nid].x, _nodes[nid].y);
-            if (d > kMaxWalkEdgeYds) continue;
-            if (RegionForPosition(req.from_map, _nodes[nid].x, _nodes[nid].y) != from_region) continue;
-            if (std::fabs(_nodes[nid].z - req.from_z) >
-                std::max(kMaxWalkEdgeDz, d * 0.25f)) continue;
-            cand.emplace_back(attach_cost(d, _nodes[nid].z - req.from_z), nid);
+            for (NodeId nid : it->second)
+            {
+                if (_nodes[nid].dead_end_entrance) continue;   // no walk edge leads on from it (EntrancePockets.h)
+                const float d = Dist2D(req.from_x, req.from_y, _nodes[nid].x, _nodes[nid].y);
+                if (d > radius) continue;
+                if (RegionForPosition(req.from_map, _nodes[nid].x, _nodes[nid].y) != from_region) continue;
+                if (std::fabs(_nodes[nid].z - req.from_z) >
+                    std::max(kMaxWalkEdgeDz, d * 0.25f)) continue;
+                cand.emplace_back(attach_cost(d, _nodes[nid].z - req.from_z), nid);
+            }
+            if (!cand.empty()) break;
         }
         std::sort(cand.begin(), cand.end(),
                   [](auto const& a, auto const& b) { return a.first < b.first; });
@@ -1493,15 +1584,20 @@ Route UnifiedTravelGraph::FindRoute(RouteRequest const& req) const
     if (auto it = _nodes_by_map.find(req.to_map); it != _nodes_by_map.end())
     {
         const uint32 to_region = RegionForPosition(req.to_map, req.to_x, req.to_y);
-        for (NodeId nid : it->second)
+        for (float const radius : { kMaxWalkEdgeYds, kFarAttachYds })
         {
-            if (RegionForPosition(req.to_map, _nodes[nid].x, _nodes[nid].y) != to_region) continue;
-            const float d = Dist2D(req.to_x, req.to_y, _nodes[nid].x, _nodes[nid].y);
-            if (std::fabs(_nodes[nid].z - req.to_z) >
-                std::max(kMaxWalkEdgeDz, d * 0.25f)) continue;
-            if (d <= kMaxWalkEdgeYds)
-                to_attach.push_back({nid,
-                    attach_cost(d, _nodes[nid].z - req.to_z)});
+            for (NodeId nid : it->second)
+            {
+                if (_nodes[nid].dead_end_entrance) continue;   // no walk edge leads to it (EntrancePockets.h)
+                if (RegionForPosition(req.to_map, _nodes[nid].x, _nodes[nid].y) != to_region) continue;
+                const float d = Dist2D(req.to_x, req.to_y, _nodes[nid].x, _nodes[nid].y);
+                if (std::fabs(_nodes[nid].z - req.to_z) >
+                    std::max(kMaxWalkEdgeDz, d * 0.25f)) continue;
+                if (d <= radius)
+                    to_attach.push_back({nid,
+                        attach_cost(d, _nodes[nid].z - req.to_z)});
+            }
+            if (!to_attach.empty()) break;
         }
     }
     out.from_attach_count = uint32(from_attach.size());

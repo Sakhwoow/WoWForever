@@ -112,7 +112,7 @@ struct FollowIntent          { ObjectGuid leader; float distance; float angle_ra
 struct UseItemIntent         { uint8 bag, slot; ObjectGuid target; };
 struct UseItemByEntryIntent  { uint32 item_entry; ObjectGuid target; };
 struct EquipItemIntent       { uint8 from_bag, from_slot; uint8 to_slot; };
-struct LootIntent            { ObjectGuid corpse_or_object; };
+struct LootIntent            { ObjectGuid corpse_or_object; bool quest_only = false; };   // quest_only: take only this bot's quest drops
 struct ReleaseCorpseIntent   {};
 struct ReviveAtCorpseIntent  {};
 // Corpse-run completion: bot is ghost and has walked back into reclaim
@@ -148,7 +148,8 @@ struct QuestAcceptIntent     { ObjectGuid npc; uint32 quest_id; };
 // `reward_choice` selects from the quest's choice-item list (0 = first).
 // Pass 0xFF to let PlayerbotAPI auto-pick (ScoreQuestReward weighs equippable
 // upgrades > vendor value). Quests with only fixed rewards ignore the field.
-struct QuestCompleteIntent   { ObjectGuid npc; uint32 quest_id; uint8 reward_choice; };
+// copy_leader: the bot's copy is finished for it first (a grouped bot that does not loot) because its leader just handed the quest in.
+struct QuestCompleteIntent   { ObjectGuid npc; uint32 quest_id; uint8 reward_choice; bool copy_leader = false; };
 struct QuestAbandonIntent    { uint32 quest_id; };
 // Accept a quest just shared by a group member. The receiver-side popup is
 // driven by `Player::SetQuestSharingInfo`; the API uses GetSharedQuestID for
@@ -274,6 +275,8 @@ struct PerformEmoteIntent { uint32 emote_id; ObjectGuid target; };
 struct FaceTargetIntent { ObjectGuid target; bool combat = false; };
 struct VendorBuyByEntryIntent { ObjectGuid npc; uint32 item_entry; uint32 count; };
 struct TogglePvpIntent {};
+// Set the explicit PvP flag on or off (as the client's PvP button; API::set_pvp): the world PvP flag rule (Fleet/WorldPvp.h).
+struct SetPvpIntent { bool on = false; };
 struct AddFriendIntent    { std::string name; std::string note; };
 struct MailSendMoneyIntent { std::string recipient; uint64 copper; std::string subject; std::string body; };
 // Mail an item attachment. count=0 means whole stack; copper rides along on
@@ -382,6 +385,8 @@ struct LfgRoleCheckIntent { uint8 roles; };
 // reviving at the graveyard outside. Lives in QueueIntent with the other
 // instance-entry ops (BG port, LFG proposal). Calls API::enter_area_trigger.
 struct EnterAreaTriggerIntent { uint32 area_trigger_id; };
+// Playerbot.AlwaysBuffs: keep the bot in the always-on state of its place: `set` is a BuffSet, `mask` the kAlwaysMask* kinds that are on there (0 = take every always-on aura off).
+struct AlwaysBuffIntent { uint8 set; uint8 mask; };
 
 // ---- World interaction ----
 struct UseObjectIntent       { ObjectGuid object; };
@@ -528,6 +533,12 @@ namespace EconomyOp {
     // (PlayerbotAPI::stock_raid_consumable; the core refuses anything outside the kits and any
     // map but a raid). Gated by Playerbot.Raid.ProvideConsumables.
     struct StockRaidConsumable { uint32 item; };
+    // Raid preparation: wear the vanilla resistance pieces of `school` (a SpellSchools value) in place of the bot's own, or put its own
+    // back (school 0). BotPopulationManager::SwapResistGear; gated by Playerbot.Raid.ResistGear.
+    struct ResistGear { uint8 school; };
+    // Raid preparation: wear the Onyxia Scale Cloak in Blackwing Lair (on), or put the bot's own cloak back (off).
+    // BotPopulationManager::SwapFightCloak; gated by Playerbot.Raid.OnyxiaCloak.
+    struct FightCloak { bool on; };
 }
 
 struct EconomyIntent
@@ -542,7 +553,9 @@ struct EconomyIntent
         EconomyOp::CraftPost,
         EconomyOp::CraftClaim,
         EconomyOp::RestockClassSupplies,
-        EconomyOp::StockRaidConsumable
+        EconomyOp::StockRaidConsumable,
+        EconomyOp::ResistGear,
+        EconomyOp::FightCloak
     > op;
 };
 
@@ -609,7 +622,7 @@ struct QueueIntent
     std::variant<
         BgQueueIntent, BgLeaveIntent, BgPortIntent,
         LfgQueueIntent, LfgUnqueueIntent, LfgProposalRespondIntent,
-        LfgRoleCheckIntent, EnterAreaTriggerIntent
+        LfgRoleCheckIntent, EnterAreaTriggerIntent, AlwaysBuffIntent
     > op;
 };
 // Housing (12.0+) — 4 sub-ops. Wrapped per feedback_intent_variant_capacity
@@ -653,7 +666,7 @@ using IntentBody = std::variant<
     ToggleAfkIntent, ToggleDndIntent,
     SetDungeonDifficultyIntent, SetRaidDifficultyIntent,
     PerformEmoteIntent, FaceTargetIntent,
-    TogglePvpIntent,
+    TogglePvpIntent, SetPvpIntent,
     AddFriendIntent, RemoveFriendIntent, AddIgnoreIntent, RemoveIgnoreIntent,
     CalendarRsvpAllIntent,
     GuildBankDepositMoneyIntent, GuildBankWithdrawMoneyIntent,
@@ -704,7 +717,7 @@ inline size_t IntentKind(Intent const& i) { return i.body.index(); }
 // wedge read as "Dismount | ServerRefused" — diagnosed as the wrong bug on
 // 2026-06-10). The static_asserts force this list to be updated whenever an
 // alternative is added to / removed from IntentBody.
-static_assert(std::variant_size_v<IntentBody> == 100,
+static_assert(std::variant_size_v<IntentBody> == 101,
               "IntentBody changed — update IntentKindName() below to match.");
 inline char const* IntentKindName(size_t kind)
 {
@@ -732,7 +745,7 @@ inline char const* IntentKindName(size_t kind)
         "ToggleAfk", "ToggleDnd",
         "SetDungeonDifficulty", "SetRaidDifficulty",
         "PerformEmote", "FaceTarget",
-        "TogglePvp",
+        "TogglePvp", "SetPvp",
         "AddFriend", "RemoveFriend", "AddIgnore", "RemoveIgnore",
         "CalendarRsvpAll",
         "GuildBankDepositMoney", "GuildBankWithdrawMoney",

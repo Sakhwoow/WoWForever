@@ -5,7 +5,7 @@
 
 #include "Bot/BotSnapshot.h"
 #include "Group/GroupSnapshot.h"
-#include "Threading/AtomicSharedPtr.h"
+#include "Util/AtomicSharedPtr.h"
 #include <atomic>
 #include <memory>
 #include <shared_mutex>

@@ -59,7 +59,7 @@ function(playerbot_v2_configure_sublib target_name)
     target_compile_options(${target_name} PRIVATE /W4 /we4717)
   else()
     target_compile_options(${target_name} PRIVATE -Wall -Wextra -Wpedantic)
-    # -Winfinite-recursion exists from GCC 12 / Clang 4; GCC 11 (our server) stops on an unknown -Werror= option, so ask first.
+    # -Winfinite-recursion exists from GCC 12 / Clang 4; GCC 11 stops on an unknown -Werror= option, so ask first
     include(CheckCXXCompilerFlag)
     check_cxx_compiler_flag(-Winfinite-recursion PLAYERBOT_V2_HAS_WINFINITE_RECURSION)
     if(PLAYERBOT_V2_HAS_WINFINITE_RECURSION)
@@ -178,6 +178,8 @@ playerbot_v2_configure_sublib(playerbot-v2-api)
 add_library(playerbot-v2-core STATIC
   ${CMAKE_CURRENT_SOURCE_DIR}/PlayerbotV2.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/PlayerbotV2Scripts.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/LfgBotFill.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/DungeonFinder.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/Services.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/Commands/cs_playerbot_v2.cpp
 )
@@ -186,6 +188,7 @@ target_sources(playerbot-v2-core
     FILE_SET headers_root TYPE HEADERS BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
     FILES
       ${CMAKE_CURRENT_SOURCE_DIR}/PlayerbotV2.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/LfgBotFill.h
       ${CMAKE_CURRENT_SOURCE_DIR}/Services.h
       ${CMAKE_CURRENT_SOURCE_DIR}/PCH.h
 )
@@ -222,8 +225,9 @@ set(PLAYERBOT_V2_SUBLIBS
   playerbot-v2-api
   playerbot-v2-core
 )
-if(MSVC)
-  target_link_libraries(playerbot-v2 INTERFACE ${PLAYERBOT_V2_SUBLIBS})
+if(MSVC OR APPLE)
+  # Apple's ld64 also searches every archive until all symbols resolve, and CMake has no RESCAN link group for it
+  target_link_libraries(playerbot-v2 INTERFACE ${PLAYERBOT_V2_SUBLIBS} game)
 else()
   # game calls the module through PlayerbotHooks and the module calls back into game (PlayerbotAPI.cpp, ClassicSpec.cpp,
   # BotItemScorer.cpp), so game belongs in the same group; otherwise an executor that lists game before this
@@ -234,7 +238,8 @@ endif()
 
 trinity_add_module(playerbot-v2 AddSC_playerbot_v2
   CONFIGS
-    ${CMAKE_CURRENT_SOURCE_DIR}/conf/playerbot.conf.dist)
+    ${CMAKE_CURRENT_SOURCE_DIR}/conf/playerbot.conf.dist
+    ${CMAKE_CURRENT_SOURCE_DIR}/conf/zz-0-playerbot-defaults.conf)
 
 # Default settings (world bots, auction house bot, bot logging) as an active file in worldserver.conf.d, so the bots work
 # out of the box. An existing copy is never overwritten.
@@ -249,10 +254,20 @@ if(COPY_CONF)
     set(_pbv2_install_conf_dir ${CMAKE_INSTALL_PREFIX}/worldserver.conf.d)
   endif()
   if(_pbv2_build_conf_dir)
+    # The Looking-for-group settings are a file of their own (zz-forever-lfg.conf), copied the same way.
+    set(PLAYERBOT_V2_LFG_CONF ${CMAKE_CURRENT_SOURCE_DIR}/conf/zz-forever-lfg.conf)
+    # The classic script loggers (zz-forever-classic-log.conf) likewise, so an install that already has zz-forever-bots.conf gets them.
+    set(PLAYERBOT_V2_CLASSIC_LOG_CONF ${CMAKE_CURRENT_SOURCE_DIR}/conf/zz-forever-classic-log.conf)
     add_custom_target(playerbot-v2-default-conf ALL
       COMMAND ${CMAKE_COMMAND} -DSRC=${PLAYERBOT_V2_DEFAULT_CONF} -DDST_DIR=${_pbv2_build_conf_dir}
+              -P ${PLAYERBOT_V2_COPY_IF_MISSING}
+      COMMAND ${CMAKE_COMMAND} -DSRC=${PLAYERBOT_V2_LFG_CONF} -DDST_DIR=${_pbv2_build_conf_dir}
+              -P ${PLAYERBOT_V2_COPY_IF_MISSING}
+      COMMAND ${CMAKE_COMMAND} -DSRC=${PLAYERBOT_V2_CLASSIC_LOG_CONF} -DDST_DIR=${_pbv2_build_conf_dir}
               -P ${PLAYERBOT_V2_COPY_IF_MISSING})
     install(CODE "execute_process(COMMAND \"${CMAKE_COMMAND}\" \"-DSRC=${PLAYERBOT_V2_DEFAULT_CONF}\" \"-DDST_DIR=\$ENV{DESTDIR}${_pbv2_install_conf_dir}\" -P \"${PLAYERBOT_V2_COPY_IF_MISSING}\")")
+    install(CODE "execute_process(COMMAND \"${CMAKE_COMMAND}\" \"-DSRC=${PLAYERBOT_V2_LFG_CONF}\" \"-DDST_DIR=\$ENV{DESTDIR}${_pbv2_install_conf_dir}\" -P \"${PLAYERBOT_V2_COPY_IF_MISSING}\")")
+    install(CODE "execute_process(COMMAND \"${CMAKE_COMMAND}\" \"-DSRC=${PLAYERBOT_V2_CLASSIC_LOG_CONF}\" \"-DDST_DIR=\$ENV{DESTDIR}${_pbv2_install_conf_dir}\" -P \"${PLAYERBOT_V2_COPY_IF_MISSING}\")")
   endif()
 endif()
 

@@ -134,6 +134,7 @@ void BugTicket::SaveToDB() const
     stmt->setUInt32(idx, _id);
     stmt->setUInt64(++idx, _playerGuid.GetCounter());
     stmt->setString(++idx, _note);
+    stmt->setInt64(++idx, _createTime);
     stmt->setUInt16(++idx, _mapId);
     stmt->setFloat(++idx, _pos.GetPositionX());
     stmt->setFloat(++idx, _pos.GetPositionY());
@@ -238,6 +239,7 @@ void ComplaintTicket::SaveToDB() const
     stmt->setUInt32(idx, _id);
     stmt->setUInt64(++idx, _playerGuid.GetCounter());
     stmt->setString(++idx, _note);
+    stmt->setInt64(++idx, _createTime);
     stmt->setUInt16(++idx, _mapId);
     stmt->setFloat(++idx, _pos.GetPositionX());
     stmt->setFloat(++idx, _pos.GetPositionY());
@@ -351,6 +353,7 @@ void SuggestionTicket::SaveToDB() const
     stmt->setUInt32(idx, _id);
     stmt->setUInt64(++idx, _playerGuid.GetCounter());
     stmt->setString(++idx, _note);
+    stmt->setInt64(++idx, _createTime);
     stmt->setUInt16(++idx, _mapId);
     stmt->setFloat(++idx, _pos.GetPositionX());
     stmt->setFloat(++idx, _pos.GetPositionY());

@@ -28,11 +28,14 @@
 #include "Travel/QuestHubDatabase.h"
 #include "Travel/PortalIndex.h"
 #include "Travel/UnifiedTravelGraph.h"
+#include "Travel/SoakBoard.h"
 #include "Bot/States/MaintainHelpers.h"
 #include "GameTime.h"
 #include "DB2Stores.h"
 #include "Map.h"
 #include "ObjectMgr.h"
+#include "AreaTriggerDataStore.h"
+#include "AreaTriggerTemplate.h"
 #include "Log.h"
 #include <cmath>
 #include <limits>
@@ -41,6 +44,76 @@
 namespace Playerbot {
 
 namespace {
+
+// ---------- idle:soak_travel ----------
+// The travel soak (Playerbot.World.TravelSoak, Fleet/WorldBotSpawner.cpp DriveTravelSoak): the world thread gives a few bots a place of the
+// travel graph (Travel/SoakBoard.h); this rule walks, flies and rides them there with the quest travel executor and reports how the leg
+// ended: arrived, timed out where it stood, or no route. Ordinary bots never have an assignment, so the gate costs one locked lookup.
+bool SoakTravelGate(BotSnapshotView const& s, BotAI&, GroupSnapshotView const&, uint32)
+{
+    return !s.in_group() && ::Playerbot::V2::Travel::SoakBoard::Instance().Has(s.raw().guid.GetCounter());
+}
+
+bool SoakTravelFire(BotSnapshotView const& s, BotAI& ai, GroupSnapshotView const&, BotIntentEmitter& emit, uint32)
+{
+    using namespace ::Playerbot::V2::Travel;
+    SoakBoard& board = SoakBoard::Instance();
+    uint64 const id = s.raw().guid.GetCounter();
+    SoakGoal g;
+    if (!board.Get(id, g))
+        return false;
+    float bx, by, bz; s.position(bx, by, bz);
+    uint32 const now_ms = GameTime::GetGameTimeMS();
+    uint32 const legs = uint32(ai.travel_plan().size()), leg_index = uint32(ai.travel_plan_leg_index());
+    if (SoakArrived(g, s.map_id(), bx, by))
+    {
+        board.Finish(id, SoakResult::Arrived, now_ms, s.map_id(), bx, by, bz, legs, leg_index);
+        ai.clear_travel_plan();
+        return false;
+    }
+    if (SoakTimedOut(g, now_ms))
+    {
+        board.Finish(id, SoakResult::TimedOut, now_ms, s.map_id(), bx, by, bz, legs, leg_index);
+        ai.clear_travel_plan();
+        return false;
+    }
+    // Aboard a ship or zeppelin the ride rules step the bot off at the far dock; a flight runs out by itself.
+    if (s.on_transport())
+        return false;
+    if (s.is_moving())
+    {
+        ai.set_last_rule_fired("idle:soak_travel");
+        return true;
+    }
+    ::Playerbot::States::EnsureTravelPlan(s, ai, bx, by, bz, g.map, g.x, g.y, g.z, /*quest_goal=*/false);
+    if (!ai.has_travel_plan())
+    {
+        // No plan on the goal's own map is the plain walk; no plan for another map is no route.
+        if (g.map != s.map_id())
+        {
+            board.Finish(id, SoakResult::NoRoute, now_ms, s.map_id(), bx, by, bz, legs, leg_index);
+            ai.clear_travel_plan();
+            return false;
+        }
+        // A goal past the graph's own walk reach with no plan cannot be walked in a straight line (the 105 soak
+        // wandered 1000 y off course for the full 1200 s); report it with the attach counts the router logged.
+        if (std::hypot(g.x - bx, g.y - by) > 600.0f)
+        {
+            board.Finish(id, SoakResult::NoRoute, now_ms, s.map_id(), bx, by, bz, legs, leg_index);
+            ai.clear_travel_plan();
+            return false;
+        }
+        if (::Playerbot::States::ChunkedWalkToward(s, ai, emit, g.x, g.y, g.z, "idle:soak_walk", now_ms))
+            return true;
+        return false;
+    }
+    if (::Playerbot::States::DriveTravelPlanTo(s, ai, emit, bx, by, bz, g.map, g.x, g.y, g.z, /*quest_goal=*/false))
+    {
+        ai.set_last_rule_fired("idle:soak_travel");
+        return true;
+    }
+    return false;
+}
 
 // ---------- idle:swim_stuck ----------
 bool SwimStuckGate(BotSnapshotView const& s, BotAI& ai, GroupSnapshotView const&, uint32)
@@ -377,7 +450,20 @@ bool RejoinInstanceGate(BotSnapshotView const& s, BotAI&,
 // once from load-time stores (AreaTrigger.db2, ObjectMgr's trigger map), both
 // read-only after load, so the bot logic thread may read them. The same set the
 // snapshot builder resolves for a ghost's portal run.
-struct InstanceEntranceTrigger { uint32 at_id; uint32 src_map; uint32 dst_map; float x, y, z; };
+//
+// Some entrances are server-side area triggers instead: a static `areatrigger`
+// spawn whose template action is a teleport to a world_safe_locs row (the Hall
+// of Thanes portal in Old Ironforge, spawn 7). The client sends nothing for
+// those; the server ports whoever stands in the volume, bots included, so the
+// bot only has to walk into it. They carry the spawn id under
+// kServerSideEntranceBit so the rejoin bookkeeping never mistakes one for an
+// AreaTrigger.db2 id.
+constexpr uint32 kServerSideEntranceBit = 0x80000000u;
+struct InstanceEntranceTrigger
+{
+    uint32 at_id; uint32 src_map; uint32 dst_map; float x, y, z;
+    bool server_side() const { return (at_id & kServerSideEntranceBit) != 0; }
+};
 std::vector<InstanceEntranceTrigger> const& InstanceEntranceTriggers()
 {
     static std::vector<InstanceEntranceTrigger> const triggers = []
@@ -392,6 +478,26 @@ std::vector<InstanceEntranceTrigger> const& InstanceEntranceTriggers()
             if (!dme || !dme->Instanceable() || uint32(at->ContinentID) == dest->Loc.GetMapId()) continue;
             v.push_back({ at->ID, uint32(at->ContinentID), dest->Loc.GetMapId(), at->Pos.X, at->Pos.Y, at->Pos.Z });
         }
+        sAreaTriggerDataStore->ForEachAreaTriggerSpawn([&v](AreaTriggerSpawn const& spawn)
+        {
+            if (spawn.spawnId >= kServerSideEntranceBit) return;   // the key keeps 31 bits of the spawn id
+            AreaTriggerCreateProperties const* props = sAreaTriggerDataStore->GetAreaTriggerCreateProperties(spawn.Id);
+            if (!props || !props->Template) return;
+            for (AreaTriggerAction const& action : props->Template->Actions)
+            {
+                if (action.ActionType != AREATRIGGER_ACTION_TELEPORT) continue;
+                WorldSafeLocsEntry const* dest = sObjectMgr->GetWorldSafeLoc(action.Param);
+                if (!dest) continue;
+                MapEntry const* dme = sMapStore.LookupEntry(dest->Loc.GetMapId());
+                if (!dme || !dme->Instanceable() || spawn.mapId == dest->Loc.GetMapId()) continue;
+                v.push_back({ kServerSideEntranceBit | uint32(spawn.spawnId), spawn.mapId, dest->Loc.GetMapId(),
+                              spawn.spawnPoint.GetPositionX(), spawn.spawnPoint.GetPositionY(), spawn.spawnPoint.GetPositionZ() });
+                TC_LOG_INFO("playerbot.v2", "[rejoin] server-side entrance: area trigger spawn {} on map {} at ({:.1f},{:.1f},{:.1f}) leads into map {}",
+                    spawn.spawnId, spawn.mapId, spawn.spawnPoint.GetPositionX(), spawn.spawnPoint.GetPositionY(),
+                    spawn.spawnPoint.GetPositionZ(), dest->Loc.GetMapId());
+                break;
+            }
+        });
         return v;
     }();
     return triggers;
@@ -914,7 +1020,8 @@ bool RejoinInstanceFire(BotSnapshotView const& s, BotAI& ai,
         // out, vertically 25y, and let the server's volume check decide.
         if (pd <= 12.0f && std::fabs(pdz) <= 25.0f)
         {
-            if (rr.enter_ms == 0 || now_ms - rr.enter_ms >= 3000u)
+            // A server-side trigger ports the bot as it walks in; there is no CMSG_AREA_TRIGGER to send.
+            if (!t->server_side() && (rr.enter_ms == 0 || now_ms - rr.enter_ms >= 3000u))
             {
                 emit.enter_area_trigger(t->at_id);
                 rr.enter_ms = now_ms ? now_ms : 1u;
@@ -1000,6 +1107,8 @@ bool DungeonLoopRequeueFire(BotSnapshotView const& s, BotAI& ai,
 // Outgoing invite: solo bot >= L25 in a questing area (no rest bonus =
 // not in a city/inn) invites a same-faction same-bracket nearby player
 // to a group. Per-target 5-min cooldown via InviteOther absorbs declines.
+// Real players (not bots) are left out unless Playerbot.Behavior.InvitePassingPlayers = 1
+// (Karrz 2026-11-02: bots should not invite you as you walk past; a player asks by whispering "invite").
 bool InviteNearbyPlayerGate(BotSnapshotView const& s, BotAI&,
                             GroupSnapshotView const&, uint32)
 {
@@ -1024,6 +1133,7 @@ bool InviteNearbyPlayerFire(BotSnapshotView const& s, BotAI& ai,
                             BotIntentEmitter& emit, uint32)
 {
     const uint32 inv_now_ms = GameTime::GetGameTimeMS();
+    const bool invite_players = Services::Config().behavior_invite_passing_players();
     for (auto const& u : s.raw().combat.nearby_friends)
     {
         if (u.guid.IsCreature()) continue;
@@ -1031,6 +1141,7 @@ bool InviteNearbyPlayerFire(BotSnapshotView const& s, BotAI& ai,
         if (u.guid == s.raw().guid) continue;
         if (u.is_in_group) continue;
         if (Pool::IsScenarioBot(u.guid.GetCounter())) continue;   // a test squad member is not a pickup-party recruit
+        if (!invite_players && !Services::Registry().has(u.guid.GetCounter())) continue;   // a real player walking past
         if (!u.victim.IsEmpty()) continue;
         const int dlvl = int(u.level) - int(s.level());
         if (dlvl > 5 || dlvl < -5) continue;
@@ -1055,6 +1166,14 @@ bool InviteNearbyPlayerFire(BotSnapshotView const& s, BotAI& ai,
 
 void RegisterCoreFlowRules(IdleRuleRegistry& r)
 {
+    {
+        IdleRule rule;
+        rule.name     = "idle:soak_travel";
+        rule.priority = 863;   // under swim_stuck (870) and water_escape (865): a soak bot in the water still gets out first
+        rule.gate     = &SoakTravelGate;
+        rule.fire     = &SoakTravelFire;
+        r.register_rule(std::move(rule));
+    }
     {
         IdleRule rule;
         rule.name     = "idle:swim_stuck";

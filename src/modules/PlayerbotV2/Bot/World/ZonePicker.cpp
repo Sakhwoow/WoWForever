@@ -36,19 +36,16 @@
 #include "Map.h"
 #include "MapManager.h"
 #include "PhasingHandler.h"
-#include "TerrainMgr.h"
 #include "SpreadSpot.h"
 #include "GrindSpot.h"
 #include "ObjectMgr.h"
 #include "CreatureData.h"
 #include "../../Services.h"
 #include "../../Travel/QuestHubDatabase.h"
+#include "../ChannelTalk.h"
 
 #include <array>
 #include <cstring>
-#include <algorithm>
-#include <deque>
-#include <string>
 #include <vector>
 
 namespace Playerbot::V2::World {
@@ -284,15 +281,6 @@ std::vector<ResolvedTown> const& VanillaTowns()
         std::vector<ResolvedTown> out;
         LocaleConstant const locale = ::World::instance()->GetDefaultDbcLocale();   // sWorld would resolve to this namespace
         std::string missing;
-        // Diagnostics: the towns below are looked up by their English names, but the server may only hold the extracted locale's
-        // names (ruRU). Dump the Eastern Kingdoms / Kalimdor nodes once so the names and ids can be matched by hand.
-        for (TaxiNodesEntry const* node : sTaxiNodesStore)
-        {
-            if (!node || (node->ContinentID != 0 && node->ContinentID != 1)) continue;
-            TC_LOG_INFO("playerbot.v2", "[ZonePicker] taxi node {} map {} ({:.0f} {:.0f} {:.0f}) name '{}' enUS '{}' alliance {} horde {}",
-                node->ID, node->ContinentID, node->Pos.X, node->Pos.Y, node->Pos.Z, node->Name[locale] ? node->Name[locale] : "",
-                node->Name[LOCALE_enUS] ? node->Name[LOCALE_enUS] : "", NodeShownTo(node, true), NodeShownTo(node, false));
-        }
         for (VanillaTown const& t : kVanillaTowns)
         {
             for (bool side : { true, false })
@@ -315,41 +303,8 @@ std::vector<ResolvedTown> const& VanillaTowns()
                 out.push_back({ &t, side, found->Pos.X, found->Pos.Y, found->Pos.Z, found->Facing });
             }
         }
-        // Fallback for data without English names (the server holds the extracted locale only, e.g. ruRU, so no name above matches):
-        // every flight point on the two continents that stands in a vanilla leveling zone (1.12 level range above 10, not a
-        // capital) is a town of that zone, found by the zone id of its position. The names stay as the data has them.
-        static std::deque<VanillaTown> synthTowns;
-        static std::deque<std::string> synthNames;
-        uint32 synthCount = 0;
-        for (TaxiNodesEntry const* node : sTaxiNodesStore)
-        {
-            if (!node || (node->ContinentID != 0 && node->ContinentID != 1)) continue;
-            bool const toAlliance = NodeShownTo(node, true);
-            bool const toHorde = NodeShownTo(node, false);
-            if (!toAlliance && !toHorde) continue;
-            uint32 const zone = sTerrainMgr.GetZoneId(PhasingHandler::GetEmptyPhaseShift(), node->ContinentID, node->Pos.X, node->Pos.Y, node->Pos.Z);
-            uint8 lo = 0, hi = 0;
-            if (!VanillaZoneLevelRange(zone, lo, hi) || hi <= 10 || IsVanillaCapitalZone(zone)) continue;
-            // a node that a named row above already resolved is not added a second time
-            bool dup = false;
-            for (ResolvedTown const& r : out)
-                if (r.x == node->Pos.X && r.y == node->Pos.Y && r.town->map == node->ContinentID) { dup = true; break; }
-            if (dup) continue;
-            synthNames.emplace_back(node->Name[locale] && *node->Name[locale] ? node->Name[locale] : "taxi node");
-            synthTowns.push_back({ synthNames.back().c_str(), uint16(node->ContinentID), uint8(std::max<uint8>(lo, 10)), hi, toAlliance, toHorde });
-            VanillaTown const* st = &synthTowns.back();
-            for (bool side : { true, false })
-            {
-                if (side ? !toAlliance : !toHorde) continue;
-                out.push_back({ st, side, node->Pos.X, node->Pos.Y, node->Pos.Z, node->Facing });
-                ++synthCount;
-            }
-        }
-        TC_LOG_INFO("playerbot.v2", "[ZonePicker] Classic: {} vanilla town flight points resolved ({} of them found by zone){}{}",
-            uint32(out.size()), synthCount, missing.empty() ? "" : "; named rows not in TaxiNodes: ", missing);
-        for (ResolvedTown const& r : out)
-            TC_LOG_INFO("playerbot.v2", "[ZonePicker] town '{}' map {} L{}-{} {} ({:.1f} {:.1f} {:.1f}) o {:.2f}", r.town->town, uint32(r.town->map),
-                uint32(r.town->lo), uint32(r.town->hi), r.alliance ? "A" : "H", r.x, r.y, r.z, r.o);
+        TC_LOG_INFO("playerbot.v2", "[ZonePicker] Classic: {} vanilla town flight points resolved{}{}",
+            uint32(out.size()), missing.empty() ? "" : "; not in TaxiNodes: ", missing);
         return out;
     }();
     return towns;
@@ -420,6 +375,31 @@ bool VanillaZoneLevelRange(uint32 zone_id, uint8& lo, uint8& hi)
         return true;
     }
     return false;
+}
+
+std::string VanillaLevelPlaces(uint8 level)
+{
+    std::string zones;
+    for (VanillaZone const& z : kVanillaZones)
+    {
+        if (level < z.lo || level > z.hi || (z.lo == 1 && level > 10) || z.zone == 16593)
+            continue;
+        AreaTableEntry const* e = sAreaTableStore.LookupEntry(z.zone);
+        if (!e)
+            continue;
+        zones += std::string(zones.empty() ? "" : ", ") + e->AreaName[LOCALE_enUS];
+    }
+    std::string dungeons;
+    for (ChannelTalk::Dungeon const& d : ChannelTalk::kDungeons)
+        if (level + 2 >= d.lo && level <= d.hi)
+            dungeons += std::string(dungeons.empty() ? "" : ", ") + d.name;
+    std::string out = "Real places for level " + std::to_string(uint32(level)) + ": zones " + (zones.empty() ? std::string("(a starting zone)") : zones);
+    out += "; dungeons " + (dungeons.empty() ? std::string("none yet") : dungeons) + ".";
+    if (level >= 58)
+        out += " At 60 people run Blackrock Depths, Stratholme, Scholomance, Dire Maul and Blackrock Spire, raid Molten Core, Onyxia, "
+               "Blackwing Lair and Zul'Gurub, farm gold and reputation, and do PvP; they don't level or grind in low zones.";
+    out += " Name only these (or none).";
+    return out;
 }
 
 bool IsVanillaCapitalZone(uint32 zone_id)
@@ -567,6 +547,28 @@ std::vector<GrindSpot> const& GrindSpotsFor(bool alliance)
 }
 
 } // anonymous
+
+bool FindGrindSpotNear(bool alliance, uint32 map, float x, float y, uint32 level, uint64 seed, float max_yards, float& ox, float& oy, float& oz)
+{
+    std::vector<GrindSpot> const& gs = GrindSpotsFor(alliance);
+    int best = -1;
+    uint64 best_key = 0;
+    for (std::size_t i = 0; i < gs.size(); ++i)
+    {
+        GrindSpot const& g = gs[i];
+        if (g.map != map) continue;
+        uint32 const gap = g.level > level ? g.level - level : level - g.level;
+        if (gap > kGrindLevelSpread) continue;
+        if (std::hypot(g.x - x, g.y - y) > max_yards) continue;
+        uint64 key = (seed + 1u) * 0x9E3779B97F4A7C15ull ^ (uint64(i) + 1u) * 0xC2B2AE3D27D4EB4Full;
+        key ^= key >> 29;
+        if (best < 0 || key < best_key) { best = int(i); best_key = key; }
+    }
+    if (best < 0)
+        return false;
+    ox = gs[best].x; oy = gs[best].y; oz = gs[best].z;
+    return true;
+}
 
 DestinationPick SpreadWithinZone(DestinationPick d, uint8 level, bool alliance, uint64 seed, bool allow_grind)
 {

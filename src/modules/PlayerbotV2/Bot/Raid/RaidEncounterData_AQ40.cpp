@@ -25,11 +25,17 @@ namespace Playerbot::Raid {
         r.interruptFirst.push_back(26071);
         r.interruptFirst.push_back(26143);
 
+        // One entry per encounter, in the order of the clear and index for index with the script's progression waypoints: the
+        // owed boss is bosses[encounters done] and is steered to by the waypoint at that index. The bug trio and the twins are one
+        // encounter each (temple_of_ahnqiraj.h DATA_BUG_TRIO / DATA_TWIN_EMPERORS), so Vem stands for the trio and Vek'nilash for
+        // the twins; Ouro has no static spawn (raised from his mound) and no waypoint. With all twelve listed, the waypoints
+        // answered the wrong boss from the third on. Kri, Yauj, Vek'lor and Ouro are boss rank, so RaidBrain still reads them as
+        // bosses (detail::IsBoss).
         r.bosses = { 15263,                 // The Prophet Skeram
-                     15543, 15511, 15544,   // Bug trio: Yauj, Kri, Vem
+                     15544,                 // Bug trio (Vem, with Kri and Yauj)
                      15516, 15510, 15299,   // Sartura, Fankriss, Viscidus
-                     15509, 15275, 15276,   // Huhuran, Twin Emperors (Vek'nilash, Vek'lor)
-                     15517, 15727 };        // Ouro, C'Thun
+                     15509, 15275,          // Huhuran, Twin Emperors (Vek'nilash, with Vek'lor)
+                     15727 };               // C'Thun
 
         // ---------------------------------------------------------------------------------------------------------------
         // TRASH
@@ -141,6 +147,17 @@ namespace Playerbot::Raid {
         // Frenzy 26051: Tranquilizing Shot is the PvE coordinator's (PlanTranq, any aura the shot removes).
         r.dispel.push_back({ 26053, DispelKind::Poison });
         r.noDispel.push_back(26180);
+        // Her Poison Bolt Volley and Acid Spit are nature: Greater Nature Protection for everyone.
+        r.resistPotion.push_back({ 15509, 13458, Who::Anyone });
+        // Noxious Poison lands on everybody within 6 yd of its target (vanilla data, radius index 18): the ranged and the healers keep 8 apart.
+        r.spread.push_back({ 15509, 8.0f, Who::Ranged });
+        r.spread.push_back({ 15509, 8.0f, Who::Healer });
+        // Poison Bolt Volley 26052 (1,500-2,500 nature on the 15 nearest) is not only a berserk move: vanilla Frenzy 26051, which she
+        // casts every 25-35 s from the pull, carries it as a periodic trigger every 4 s (vmangos spell data, effect 3), and Berserk 26068
+        // every 2 s below 31% or after 5 min. The ranged and the healers stand 20 yards off for the whole fight so the 15 nearest are
+        // the melee and the tanks (123 run: healers at 10-12 y died to the volley at 87% boss health, 4 s apart).
+        r.avoidEnemy.push_back({ 15509, 20.0f, Who::Ranged });
+        r.avoidEnemy.push_back({ 15509, 20.0f, Who::Healer });
 
         // ---------------------------------------------------------------------------------------------------------------
         // TWIN EMPERORS (aq40/classic_boss_twinemperors.cpp): Vek'nilash (15275) is immune to magic, Vek'lor (15276) to physical

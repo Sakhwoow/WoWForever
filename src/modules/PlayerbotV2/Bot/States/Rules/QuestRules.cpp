@@ -5,6 +5,7 @@
 #include "Bot/IdleRule.h"
 #include "Group/GroupSnapshot.h"
 #include "Bot/BotAI.h"
+#include "Bot/BotBridge.h"
 #include "Bot/DeathHotspots.h"
 #include "GameTime.h"
 #include "Bot/BotSnapshotView.h"
@@ -22,6 +23,7 @@
 #include "Services.h"
 #include "Travel/QuestHubDatabase.h"
 #include "Travel/RegionMapper.h"
+#include "Bot/World/SpreadSpot.h"
 #include "ObjectAccessor.h"
 #include "UnitDefines.h"
 #include "Log.h"
@@ -316,11 +318,10 @@ bool QuestAcceptFire(BotSnapshotView const& s, BotAI& ai, GroupSnapshotView cons
     // not a cross-zone trek (far givers stay with the travel/hub cascade).
     if (near_dsq < 60.0f * 60.0f && !s.in_combat())
     {
-        const float dist = std::sqrt(near_dsq);
-        const float scale = (dist - 2.5f) / dist;   // stop 2.5y — inside the 3.5y accept-emit margin
-        emit.move_to(bx + (near_gx - bx) * scale,
-                     by + (near_gy - by) * scale,
-                     near_gz, /*run*/ true);
+        // The bot's own spot 2-4 yd from the giver (inside the accept margin), not one shared point on the line to him.
+        float stand_x = near_gx, stand_y = near_gy;
+        ::Playerbot::V2::World::GiverStandPoint(near_gx, near_gy, bx, by, s.guid().GetCounter(), stand_x, stand_y);
+        emit.move_to(stand_x, stand_y, near_gz, /*run*/ true);
         ai.grant_detour(s.published_at_ms());
         ai.set_last_rule_fired(s.is_in_dungeon() ? "idle:dungeon_quest_approach"
                                                  : "idle:quest_accept_approach");
@@ -432,6 +433,9 @@ bool QuestAbandonUnachievableFire(BotSnapshotView const& s, BotAI& ai, GroupSnap
         ai.blacklist_quest(q.quest_id, s.raw().published_at_ms);
         emit.abandon_quest(q.quest_id);
         ai.set_last_rule_fired("idle:quest_abandon_unachievable");
+        if (BotBridge::Enabled())
+            BotBridge::ReportQuestFail(s.bot_id(), q.quest_id, junk ? "dropped the quest: it can never be turned in"
+                                                                    : "dropped the quest: an objective needs a script credit bots cannot get (no normal mob to kill for it)");
         return true;
     }
     return false;
@@ -639,7 +643,12 @@ bool WalkToKnownHubFire(BotSnapshotView const& s, BotAI& ai,
         if (!found) continue;
         const float dx = gx - bx, dy = gy - by, dz = gz - bz;
         const float dsq = dx*dx + dy*dy + dz*dz;
-        if (dsq < best_dsq) { best_dsq = dsq; bx_t = gx; by_t = gy; bz_t = gz; have_target = true; }
+        if (dsq < best_dsq)
+        {
+            // The bot's own spot beside the giver, not the giver's coordinates (every bot walked onto him and stood inside him).
+            best_dsq = dsq; bz_t = gz; have_target = true;
+            ::Playerbot::V2::World::GiverStandPoint(gx, gy, bx, by, s.guid().GetCounter(), bx_t, by_t);
+        }
     }
 
     // FIX 5b: else prefer the nearest SAME-MAP QuestHubDatabase hub that STILL
@@ -653,7 +662,6 @@ bool WalkToKnownHubFire(BotSnapshotView const& s, BotAI& ai,
         if (Player* self = ObjectAccessor::FindConnectedPlayer(s.raw().guid))
         {
             ::Playerbot::V2::Travel::QuestHub const* picked = nullptr;
-            float picked_dsq = std::numeric_limits<float>::infinity();
             // Collect same-map appropriate hubs nearest-first, then take the
             // first with a doable quest (early-exit predicate keeps this cheap).
             std::vector<std::pair<float, ::Playerbot::V2::Travel::QuestHub const*>> near;
@@ -674,15 +682,16 @@ bool WalkToKnownHubFire(BotSnapshotView const& s, BotAI& ai,
                 // instead of re-targeting the same unreachable/empty hub.
                 if (ai.hub_recently_tried(dh.second->hubId, wk_now_ms)) continue;
                 if (::Playerbot::HubHasDoableQuest(self, *dh.second))
-                { picked = dh.second; picked_dsq = dh.first; break; }
+                { picked = dh.second; break; }
             }
 
             if (picked)
             {
-                best_dsq = picked_dsq;
-                bx_t = picked->location.GetPositionX();
-                by_t = picked->location.GetPositionY();
+                // The bot's own spot in the hub, not its centre: a hub of one giver is that giver's spot, and every bot walked onto it.
+                ::Playerbot::V2::World::HubStandPoint(picked->location.GetPositionX(), picked->location.GetPositionY(), picked->radius,
+                                                      s.guid().GetCounter(), bx_t, by_t);
                 bz_t = picked->location.GetPositionZ();
+                best_dsq = (bx_t - bx) * (bx_t - bx) + (by_t - by) * (by_t - by) + (bz_t - bz) * (bz_t - bz);
                 picked_hub_id = picked->hubId;
                 have_target = true;
             }
@@ -882,6 +891,20 @@ bool QuestPursueGoalFire(BotSnapshotView const& s, BotAI& ai, GroupSnapshotView 
     const float dx = poi.x - bx, dy = poi.y - by;
     const float dist = std::sqrt(dx * dx + dy * dy);
     if (dist < 1.0f) return false;
+    // Moving all the while, never closer (Bot/IdleWatch.h GoalProgress): the goal cannot be walked to from here. Give the objective up
+    // for 10 minutes so the picker takes another, the answer the idle watch gives a bot that stands still before a goal it cannot close.
+    {
+        uint64 const gkey = (uint64(poi.map_id) << 48) ^ (uint64(uint32(int32(std::floor(poi.x / 10.0f))) & 0xFFFFFFu) << 24)
+                          ^ uint64(uint32(int32(std::floor(poi.y / 10.0f))) & 0xFFFFFFu);
+        if (V2::GoalStalled(ai.goal_progress(), gkey, dist, now_ms))
+        {
+            ai.blacklist_current_objective(now_ms + 10u * 60u * 1000u);
+            TC_LOG_INFO("playerbot.v2", "[pursue_stall] {} lvl={} zone={} walked {} s toward ({:.0f},{:.0f}) on map {} without getting {:.0f} y closer ({:.0f} y left): objective given up for 10 minutes",
+                        s.name(), uint32(s.level()), s.zone_id(), V2::kGoalProgressMs / 1000u, poi.x, poi.y, poi.map_id, V2::kGoalProgressYards, dist);
+            ai.set_last_rule_fired("idle:pursue_quest_goal_stall");
+            return false;
+        }
+    }
     // A place that has just killed several bots (DeathHotspots) is off limits for a bot well below the killers' level:
     // blacklist the objective for 20 minutes so the picker takes another quest.
     if (::Playerbot::DeathHotspots::Instance().Dangerous(poi.map_id, poi.x, poi.y, uint8(s.level()),
@@ -960,7 +983,7 @@ bool QuestPursueGoalFire(BotSnapshotView const& s, BotAI& ai, GroupSnapshotView 
 // Side effect only: the rule never claims the tick. Playerbot.World.QuestSiteCap (default 5, 0 = off).
 bool QuestSiteShareGate(BotSnapshotView const& s, BotAI& ai, GroupSnapshotView const&, uint32)
 {
-    static uint32 const cap = uint32(std::max<int32>(0, sConfigMgr->GetIntDefault("Playerbot.World.QuestSiteCap", int32(V2::Fleet::kQuestSiteCapDefault))));
+    static uint32 const cap = uint32(std::max<int32>(0, sConfigMgr->GetIntDefault("Playerbot.World.QuestSiteCap", int32(V2::Fleet::kQuestSiteCapDefault), true)));
     if (cap == 0) return false;
     if (s.has_owner_character() || s.in_group() || s.is_in_instance() || s.is_in_dungeon() || s.in_battleground()) return false;
     auto const& poi = s.current_objective_poi();
@@ -971,7 +994,7 @@ bool QuestSiteShareGate(BotSnapshotView const& s, BotAI& ai, GroupSnapshotView c
 
 bool QuestSiteShareFire(BotSnapshotView const& s, BotAI& ai, GroupSnapshotView const&, BotIntentEmitter&, uint32 now_ms)
 {
-    uint32 const cap = uint32(std::max<int32>(0, sConfigMgr->GetIntDefault("Playerbot.World.QuestSiteCap", int32(V2::Fleet::kQuestSiteCapDefault))));
+    uint32 const cap = uint32(std::max<int32>(0, sConfigMgr->GetIntDefault("Playerbot.World.QuestSiteCap", int32(V2::Fleet::kQuestSiteCapDefault), true)));
     float bx, by, bz; s.position(bx, by, bz);
     std::vector<V2::Fleet::SiteWorker> near;
     for (auto const& u : s.raw().combat.nearby_friends)

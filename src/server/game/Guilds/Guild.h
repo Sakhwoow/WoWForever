@@ -26,6 +26,7 @@
 #include "RaceMask.h"
 #include "SharedDefines.h"
 #include "UniqueTrackablePtr.h"
+#include <functional>
 #include <set>
 #include <unordered_map>
 
@@ -576,6 +577,7 @@ class TC_GAME_API Guild
                     m_guildId(guildId), m_rankId(rankId), m_rankOrder(rankOrder), m_name(name), m_rights(rights), m_bankMoneyPerDay(money) { }
 
                 void LoadFromDB(Field* fields);
+                static std::string GetDefaultRankName(GuildRankOrder rankOrder);
                 void SaveToDB(CharacterDatabaseTransaction trans) const;
 
                 GuildRankId GetId() const { return m_rankId; }
@@ -828,6 +830,10 @@ class TC_GAME_API Guild
 
         // Broadcasts
         void BroadcastToGuild(WorldSession* session, bool officerOnly, std::string_view msg, uint32 language = LANG_UNIVERSAL) const;
+        // BroadcastToGuild with each member reading the text `textFor` gives for them: a bot's line in the reader's language
+        // (PlayerbotV2 BotLanguage). The returned reference must stay valid for the call; members given the same text share a packet.
+        void BroadcastToGuild(WorldSession* session, bool officerOnly, std::function<std::string const&(Player const* listener)> const& textFor,
+                              uint32 language = LANG_UNIVERSAL) const;
         void BroadcastAddonToGuild(WorldSession* session, bool officerOnly, std::string_view msg, std::string_view prefix, bool isLogged) const;
         void BroadcastPacketToRank(WorldPacket const* packet, GuildRankId rankId) const;
         void BroadcastPacket(WorldPacket const* packet) const;
