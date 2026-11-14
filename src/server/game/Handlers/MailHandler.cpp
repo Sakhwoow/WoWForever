@@ -120,10 +120,7 @@ void WorldSession::HandleSendMail(WorldPackets::Mail::SendMail& sendMail)
         {
             if (!recipientSurname.empty())
             {
-                // character names are unique in this core, the surname has to match as well (a character without one,
-                // a bot or any character with Classic.CharacterSurnames = 0, is found by the name alone)
-                CharacterCacheEntry const* entry = sCharacterCache->GetCharacterCacheByName(recipientName);
-                if (entry && (entry->Surname.empty() || StringEqualI(entry->Surname, recipientSurname)))
+                if (CharacterCacheEntry const* entry = sCharacterCache->GetCharacterCacheByFullName(recipientName, recipientSurname))
                     receiverGuid = entry->Guid;
             }
             else
