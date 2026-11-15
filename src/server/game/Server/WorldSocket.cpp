@@ -134,7 +134,8 @@ void WorldSocket::Start()
         uint32(std::max(sConfigMgr->GetIntDefault("Network.ConnectionsPerIp", 16), 0)));
     if (!_ipConnectionSlot)
     {
-        TC_LOG_ERROR("network", "WorldSocket::Start: {} already has Network.ConnectionsPerIp open connections, refusing another", address.to_string());
+        TC_LOG_ERROR("network", "WorldSocket::Start: {} already has Network.ConnectionsPerIp ({}) open connections, refusing another",
+            address.to_string(), WorldConnectionLimit.GetCount(address.to_string()));
         CloseSocket();
         return;
     }
@@ -287,6 +288,11 @@ void WorldSocket::SendAuthSession()
 
 void WorldSocket::OnClose()
 {
+    // The address's place is freed when the connection closes, not when the WorldSocket object goes: the object can outlive
+    // its connection (callbacks, the instance socket waiting in World, the session), and on the live realm a player was then
+    // refused with no connection open at all once 16 such places had piled up (2026-11-15).
+    _ipConnectionSlot.reset();
+
     {
         std::scoped_lock sessionGuard(_worldSessionLock);
         _worldSession = nullptr;
