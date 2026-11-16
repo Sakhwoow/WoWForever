@@ -526,7 +526,8 @@ public:
         if (!sourceInfo.mConditionMap)
             return false;
         Battlefield* wintergrasp = sBattlefieldMgr->GetBattlefieldByBattleId(sourceInfo.mConditionMap, BATTLEFIELD_BATTLEID_WG);
-        if (wintergrasp->IsEnabled() && wintergrasp->GetDefenderTeam() == TEAM_HORDE)
+        // в Classic (Forever) поля боя нет — без проверки сервер падал на квестах с этим условием
+        if (wintergrasp && wintergrasp->IsEnabled() && wintergrasp->GetDefenderTeam() == TEAM_HORDE)
             return true;
         return false;
     }
@@ -542,7 +543,8 @@ public:
         if (!sourceInfo.mConditionMap)
             return false;
         Battlefield* wintergrasp = sBattlefieldMgr->GetBattlefieldByBattleId(sourceInfo.mConditionMap, BATTLEFIELD_BATTLEID_WG);
-        if (wintergrasp->IsEnabled() && wintergrasp->GetDefenderTeam() == TEAM_ALLIANCE)
+        // в Classic (Forever) поля боя нет — без проверки сервер падал на квестах с этим условием
+        if (wintergrasp && wintergrasp->IsEnabled() && wintergrasp->GetDefenderTeam() == TEAM_ALLIANCE)
             return true;
         return false;
     }
