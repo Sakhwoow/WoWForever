@@ -358,6 +358,14 @@ bool LoginQueryHolder::Initialize()
     stmt->setUInt64(0, lowGuid);
     res &= SetPreparedQuery(PLAYER_LOGIN_QUERY_LOAD_BANK_TAB_SETTINGS, stmt);
 
+    stmt = CharacterDatabase.GetPreparedStatement(CHAR_SEL_CHARACTER_DAY_CYCLE);
+    stmt->setUInt64(0, lowGuid);
+    res &= SetPreparedQuery(PLAYER_LOGIN_QUERY_LOAD_DAY_CYCLE, stmt);
+
+    stmt = CharacterDatabase.GetPreparedStatement(CHAR_SEL_ACCOUNT_CHARACTER_ACHIEVEMENTS);
+    stmt->setUInt32(0, GetAccountId());
+    res &= SetPreparedQuery(PLAYER_LOGIN_QUERY_LOAD_ACCOUNT_LEGACY_ACHIEVEMENTS, stmt);
+
     return res;
 }
 
@@ -443,6 +451,17 @@ void WorldSession::HandleCharEnum(CharacterDatabaseQueryHolder const& holder)
 
             if (!charEnum.IsDeletedCharacters)
             {
+                // a choice the character's other choices rule out (Feather Color with Feathers: None) is set to the allowed one and saved,
+                // so it does not cost the character a forced recustomize
+                if (NormalizeDependentChoices(Races(charInfo.RaceID), Classes(charInfo.ClassID), charInfo.Customizations))
+                {
+                    TC_LOG_INFO("entities.player.loading", "Player {} had customization choices its other choices rule out, set to the allowed ones",
+                        charInfo.Guid.ToString());
+                    CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+                    Player::SaveCustomizations(trans, charInfo.Guid.GetCounter(), MakeChrCustomizationChoiceRange(charInfo.Customizations));
+                    CharacterDatabase.CommitTransaction(trans);
+                }
+
                 if (!ValidateAppearance(Races(charInfo.RaceID), Classes(charInfo.ClassID), Gender(charInfo.SexID), MakeChrCustomizationChoiceRange(charInfo.Customizations)))
                 {
                     TC_LOG_ERROR("entities.player.loading", "Player {} has wrong Appearance values (Hair/Skin/Color), forcing recustomize", charInfo.Guid.ToString());
@@ -762,11 +781,87 @@ bool WorldSession::MeetsChrCustomizationReq(ChrCustomizationReqEntry const* req,
     return true;
 }
 
+// Some choices are allowed only next to a choice of another option: a Skyborne's Feather Color needs Feathers, and with Feathers: None
+// the only Feather Color is a blank one (79307 male, 79306 female); a tattoo color needs its tattoo, earrings need long ears. The
+// client hides such an option once the other choice rules it out, but still sends the choice it held before (character create, race and
+// faction change, customize, barber), and characters made before that data was added keep theirs. The appearance check refused all of
+// them ("choice requirement not met"), so a Skyborne could only be made with feathers and one without could not log in. Such a choice
+// is set to the one of the same option that the other choices allow, the blank choice paired with them first, which is what the
+// client shows. A choice the race, class or anything else rules out is left for the appearance check to refuse.
+uint32 WorldSession::NormalizeDependentChoices(Races race, Classes playerClass, UF::ChrCustomizationChoice* customizations, std::size_t count) const
+{
+    Trinity::IteratorPair<UF::ChrCustomizationChoice const*> const selected(customizations, customizations + count);
+    auto meetsReq = [&](uint32 reqId, bool checkDependentChoices)
+    {
+        ChrCustomizationReqEntry const* req = sChrCustomizationReqStore.LookupEntry(reqId);
+        return !req || MeetsChrCustomizationReq(req, race, playerClass, checkDependentChoices, selected);
+    };
+
+    uint32 changed = 0;
+    // a changed choice can be what another choice depends on, so go again until nothing changes (one pass per choice at most)
+    for (std::size_t pass = 0; pass <= count; ++pass)
+    {
+        bool changedThisPass = false;
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            UF::ChrCustomizationChoice& playerChoice = customizations[i];
+            std::vector<ChrCustomizationChoiceEntry const*> const* choicesForOption = sDB2Manager.GetCustomiztionChoices(playerChoice.ChrCustomizationOptionID);
+            if (!choicesForOption)
+                continue;
+
+            auto choiceItr = std::ranges::find(*choicesForOption, playerChoice.ChrCustomizationChoiceID, &ChrCustomizationChoiceEntry::ID);
+            if (choiceItr == choicesForOption->end())
+                continue;
+
+            ChrCustomizationChoiceEntry const* choice = *choiceItr;
+            if (meetsReq(choice->ChrCustomizationReqID, true) || !meetsReq(choice->ChrCustomizationReqID, false))
+                continue;
+
+            ChrCustomizationChoiceEntry const* replacement = nullptr;
+            for (ChrCustomizationChoiceEntry const* candidate : *choicesForOption)
+            {
+                if (candidate->ID == choice->ID || !meetsReq(candidate->ChrCustomizationReqID, true))
+                    continue;
+
+                bool const paired = sDB2Manager.GetRequiredCustomizationChoices(candidate->ChrCustomizationReqID) != nullptr;
+                if (!replacement || (paired && !sDB2Manager.GetRequiredCustomizationChoices(replacement->ChrCustomizationReqID)))
+                    replacement = candidate;
+                if (paired)
+                    break;
+            }
+
+            if (!replacement)
+                continue;
+
+            TC_LOG_DEBUG("entities.player", "WorldSession::NormalizeDependentChoices: account {} race {} option {}: choice {} is ruled out by the other "
+                "choices, set to {}", GetAccountId(), uint32(race), playerChoice.ChrCustomizationOptionID, playerChoice.ChrCustomizationChoiceID,
+                replacement->ID);
+            playerChoice.ChrCustomizationChoiceID = replacement->ID;
+            changedThisPass = true;
+            ++changed;
+        }
+
+        if (!changedThisPass)
+            break;
+    }
+
+    return changed;
+}
+
 bool WorldSession::ValidateAppearance(Races race, Classes playerClass, Gender gender, Trinity::IteratorPair<UF::ChrCustomizationChoice const*> customizations)
 {
+    // Each refusal names its reason (debug, entities.player.cheat): a refused create only says "invalid appearance attributes",
+    // which cannot tell a client sending choices of another build from options missing in the server's DB2 (Skyborne, SIN, 2026-11-15).
+    auto refuse = [&](char const* reason, uint32 optionId, uint32 choiceId)
+    {
+        TC_LOG_DEBUG("entities.player.cheat", "WorldSession::ValidateAppearance: account {} race {} class {} gender {}: option {} choice {}: {}",
+            GetAccountId(), uint32(race), uint32(playerClass), uint32(gender), optionId, choiceId, reason);
+        return false;
+    };
+
     std::vector<ChrCustomizationOptionEntry const*> const* options = sDB2Manager.GetCustomiztionOptions(race, gender);
     if (!options)
-        return false;
+        return refuse("no customization options for the race and gender", 0, 0);
 
     uint32 previousOption = 0;
 
@@ -774,7 +869,7 @@ bool WorldSession::ValidateAppearance(Races race, Classes playerClass, Gender ge
     {
         // check uniqueness of options
         if (playerChoice.ChrCustomizationOptionID == previousOption)
-            return false;
+            return refuse("option sent twice", playerChoice.ChrCustomizationOptionID, playerChoice.ChrCustomizationChoiceID);
 
         previousOption = playerChoice.ChrCustomizationOptionID;
 
@@ -790,15 +885,15 @@ bool WorldSession::ValidateAppearance(Races race, Classes playerClass, Gender ge
 
         // option not found for race/gender combination
         if (!customizationOption)
-            return false;
+            return refuse("option not found for the race and gender", playerChoice.ChrCustomizationOptionID, playerChoice.ChrCustomizationChoiceID);
 
         if (ChrCustomizationReqEntry const* req = sChrCustomizationReqStore.LookupEntry(customizationOption->ChrCustomizationReqID))
             if (!MeetsChrCustomizationReq(req, race, playerClass, false, customizations))
-                return false;
+                return refuse("option requirement not met", playerChoice.ChrCustomizationOptionID, playerChoice.ChrCustomizationChoiceID);
 
         std::vector<ChrCustomizationChoiceEntry const*> const* choicesForOption = sDB2Manager.GetCustomiztionChoices(playerChoice.ChrCustomizationOptionID);
         if (!choicesForOption)
-            return false;
+            return refuse("option has no choices", playerChoice.ChrCustomizationOptionID, playerChoice.ChrCustomizationChoiceID);
 
         auto customizationChoiceDataItr = std::find_if(choicesForOption->begin(), choicesForOption->end(), [&](ChrCustomizationChoiceEntry const* choice)
         {
@@ -807,11 +902,11 @@ bool WorldSession::ValidateAppearance(Races race, Classes playerClass, Gender ge
 
         // choice not found for option
         if (customizationChoiceDataItr == choicesForOption->end())
-            return false;
+            return refuse("choice not found for the option", playerChoice.ChrCustomizationOptionID, playerChoice.ChrCustomizationChoiceID);
 
         if (ChrCustomizationReqEntry const* req = sChrCustomizationReqStore.LookupEntry((*customizationChoiceDataItr)->ChrCustomizationReqID))
             if (!MeetsChrCustomizationReq(req, race, playerClass, true, customizations))
-                return false;
+                return refuse("choice requirement not met", playerChoice.ChrCustomizationOptionID, playerChoice.ChrCustomizationChoiceID);
     }
 
     return true;
@@ -861,6 +956,9 @@ void WorldSession::HandleCharCreateOpcode(WorldPackets::Character::CreateCharact
         SendCharCreate(CHAR_CREATE_FAILED);
         return;
     }
+
+    // the client sends the choice an option held before another choice hid it (Skyborne Feather Color with Feathers: None)
+    NormalizeDependentChoices(Races(charCreate.CreateInfo->Race), Classes(charCreate.CreateInfo->Class), charCreate.CreateInfo->Customizations);
 
     // prevent character creating Expansion race without Expansion account
     RaceUnlockRequirement const* raceExpansionRequirement = sObjectMgr->GetRaceUnlockRequirement(charCreate.CreateInfo->Race);
@@ -1181,9 +1279,10 @@ void WorldSession::HandleCharCreateOpcode(WorldPackets::Character::CreateCharact
                 surname.clear();
             if (!surname.empty())
             {
-                std::string escapedSurname = surname;
-                CharacterDatabase.EscapeString(escapedSurname);
-                characterTransaction->Append(Trinity::StringFormat("UPDATE characters SET surname = '{}' WHERE guid = {}", escapedSurname, newChar->GetGUID().GetCounter()).c_str());
+                CharacterDatabasePreparedStatement* surnameStmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_SURNAME);
+                surnameStmt->setString(0, surname);
+                surnameStmt->setUInt64(1, newChar->GetGUID().GetCounter());
+                characterTransaction->Append(surnameStmt);
             }
 
             LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_REP_REALM_CHARACTERS);
@@ -1361,6 +1460,9 @@ void WorldSession::HandlePlayerLoginOpcode(WorldPackets::Character::PlayerLogin&
         return;
     }
 
+    // Classic 1.60: the official realm sends the glue feature status again as the login starts (70959 login sniffs, 18 and 19 Nov 2026)
+    SendFeatureSystemStatusGlueScreen();
+
     SendConnectToInstance(WorldPackets::Auth::ConnectToSerial::WorldAttempt1);
 }
 
@@ -1455,6 +1557,11 @@ void WorldSession::HandlePlayerLogin(LoginQueryHolder const& holder)
 
     pCurrChar->SetVirtualPlayerRealm(GetVirtualRealmAddress());
 
+    // Classic 1.60: the in-world feature status (with the game rules) goes out before SMSG_LOGIN_VERIFY_WORLD, as on the official
+    // realm (70959 login sniffs, 18 and 19 Nov 2026). The client's micro menu reads the rules once, when the game UI loads; with the
+    // status sent after LOGIN_VERIFY_WORLD some players got the Housing and Adventure Guide buttons anyway (bot repo issue #18).
+    SendFeatureSystemStatus();
+
     SendAccountDataTimes(ObjectGuid::Empty, GLOBAL_CACHE_MASK);
     SendTutorialsData();
 
@@ -1471,8 +1578,6 @@ void WorldSession::HandlePlayerLogin(LoginQueryHolder const& holder)
     // load player specific part before send times
     LoadAccountData(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_ACCOUNT_DATA), PER_CHARACTER_CACHE_MASK);
     SendAccountDataTimes(playerGuid, ALL_ACCOUNT_DATA_CACHE_MASK);
-
-    SendFeatureSystemStatus();
 
     // MOTD: sent once the client's loading screen is gone (HandleLoadScreenOpcode); sent here, during the login, the client dropped it
     _motdPending = true;
@@ -2142,9 +2247,10 @@ void WorldSession::HandleCharRenameCallBack(std::shared_ptr<WorldPackets::Charac
     // Classic 1.60: the rename dialog also sets the surname (up to 48 characters, like character creation)
     if (utf8length(renameInfo->NewSurname) > 48)
         renameInfo->NewSurname.clear();
-    std::string escapedSurname = renameInfo->NewSurname;
-    CharacterDatabase.EscapeString(escapedSurname);
-    trans->Append(Trinity::StringFormat("UPDATE characters SET surname = '{}' WHERE guid = {}", escapedSurname, lowGuid).c_str());
+    CharacterDatabasePreparedStatement* surnameStmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_SURNAME);
+    surnameStmt->setString(0, renameInfo->NewSurname);
+    surnameStmt->setUInt64(1, lowGuid);
+    trans->Append(surnameStmt);
 
     CharacterDatabase.CommitTransaction(trans);
 
@@ -2252,6 +2358,7 @@ void WorldSession::HandleAlterAppearance(WorldPackets::Character::AlterApperance
             return;
     }
 
+    NormalizeDependentChoices(Races(_player->GetRace()), Classes(_player->GetClass()), packet.Customizations);
     if (!ValidateAppearance(Races(_player->GetRace()), Classes(_player->GetClass()), Gender(packet.NewSex), customizations))
         return;
 
@@ -2336,7 +2443,11 @@ void WorldSession::HandleCharCustomizeCallback(std::shared_ptr<WorldPackets::Cha
     Gender plrGender = Gender(fields[3].GetUInt8());
     uint16 atLoginFlags = fields[4].GetUInt16();
 
-    if (!ValidateAppearance(plrRace, plrClass, plrGender, MakeChrCustomizationChoiceRange(customizeInfo->Customizations)))
+    NormalizeDependentChoices(plrRace, plrClass, customizeInfo->Customizations);
+
+    // the customize screen offers the other gender too: the new customizations belong to the gender picked there, not the saved one
+    if (!Player::IsValidGender(customizeInfo->SexID)
+        || !ValidateAppearance(plrRace, plrClass, Gender(customizeInfo->SexID), MakeChrCustomizationChoiceRange(customizeInfo->Customizations)))
     {
         SendCharCustomize(CHAR_CREATE_ERROR, customizeInfo.get());
         return;
@@ -2398,6 +2509,15 @@ void WorldSession::HandleCharCustomizeCallback(std::shared_ptr<WorldPackets::Cha
     /// Customize
     Player::SaveCustomizations(trans, lowGuid, MakeChrCustomizationChoiceRange(customizeInfo->Customizations));
 
+    // the gender goes with the customizations, as at a race change: the cache took the picked gender, the database kept the old one
+    if (plrGender != customizeInfo->SexID)
+    {
+        stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_GENDER);
+        stmt->setUInt8(0, customizeInfo->SexID);
+        stmt->setUInt64(1, lowGuid);
+        trans->Append(stmt);
+    }
+
     /// Name Change and update atLogin flags
     {
         stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_NAME_AT_LOGIN);
@@ -2415,9 +2535,10 @@ void WorldSession::HandleCharCustomizeCallback(std::shared_ptr<WorldPackets::Cha
         // Classic 1.60: the surname is edited in the same screen (up to 48 characters, like character creation)
         if (utf8length(customizeInfo->CharSurname) > 48)
             customizeInfo->CharSurname.clear();
-        std::string escapedSurname = customizeInfo->CharSurname;
-        CharacterDatabase.EscapeString(escapedSurname);
-        trans->Append(Trinity::StringFormat("UPDATE characters SET surname = '{}' WHERE guid = {}", escapedSurname, lowGuid).c_str());
+        CharacterDatabasePreparedStatement* surnameStmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_SURNAME);
+        surnameStmt->setString(0, customizeInfo->CharSurname);
+        surnameStmt->setUInt64(1, lowGuid);
+        trans->Append(surnameStmt);
     }
 
     CharacterDatabase.CommitTransaction(trans);
@@ -2727,6 +2848,18 @@ void WorldSession::HandleCharRaceOrFactionChangeCallback(std::shared_ptr<WorldPa
         return;
     }
 
+    // The race change screen also lets the player pick the other gender. Its customizations belong to the new race and gender: before
+    // the gender was saved too, a switched gender kept the old one in the database with the new gender's customizations, and
+    // Player::LoadFromDB refused the character (wrong appearance), so every login attempt disconnected (Discord 2026-11-19).
+    NormalizeDependentChoices(Races(factionChangeInfo->RaceID), Classes(playerClass), factionChangeInfo->Customizations);
+    if (!Player::IsValidGender(factionChangeInfo->SexID)
+        || !ValidateAppearance(Races(factionChangeInfo->RaceID), Classes(playerClass), Gender(factionChangeInfo->SexID),
+            MakeChrCustomizationChoiceRange(factionChangeInfo->Customizations)))
+    {
+        SendCharFactionChange(CHAR_CREATE_ERROR, factionChangeInfo.get());
+        return;
+    }
+
     // All checks are fine, deal with race change now
     ObjectGuid::LowType lowGuid = factionChangeInfo->Guid.GetCounter();
 
@@ -2755,20 +2888,22 @@ void WorldSession::HandleCharRaceOrFactionChangeCallback(std::shared_ptr<WorldPa
         // Classic 1.60: the surname is edited in the same screen (up to 48 characters, like character creation)
         if (utf8length(factionChangeInfo->Surname) > 48)
             factionChangeInfo->Surname.clear();
-        std::string escapedSurname = factionChangeInfo->Surname;
-        CharacterDatabase.EscapeString(escapedSurname);
-        trans->Append(Trinity::StringFormat("UPDATE characters SET surname = '{}' WHERE guid = {}", escapedSurname, lowGuid).c_str());
+        CharacterDatabasePreparedStatement* surnameStmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_SURNAME);
+        surnameStmt->setString(0, factionChangeInfo->Surname);
+        surnameStmt->setUInt64(1, lowGuid);
+        trans->Append(surnameStmt);
     }
 
     // Customize
     Player::SaveCustomizations(trans, lowGuid, MakeChrCustomizationChoiceRange(factionChangeInfo->Customizations));
 
-    // Race Change
+    // Race Change (the same screen can switch the gender: it is saved with the race, the customizations above are for the new one)
     {
-        stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_RACE);
+        stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_RACE_AND_GENDER);
         stmt->setUInt8(0, factionChangeInfo->RaceID);
-        stmt->setUInt16(1, PLAYER_EXTRA_HAS_RACE_CHANGED);
-        stmt->setUInt64(2, lowGuid);
+        stmt->setUInt8(1, factionChangeInfo->SexID);
+        stmt->setUInt16(2, PLAYER_EXTRA_HAS_RACE_CHANGED);
+        stmt->setUInt64(3, lowGuid);
 
         trans->Append(stmt);
     }

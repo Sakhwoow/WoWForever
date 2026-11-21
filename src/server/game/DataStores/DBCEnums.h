@@ -1303,6 +1303,7 @@ enum ItemBonusType
     ITEM_BONUS_SCALING_CONFIG                   = 51,
     ITEM_BONUS_CRAFTED_ITEM_LEVEL               = 52,
     ITEM_BONUS_SCALING_ITEM_LEVEL_BONUS         = 53,             // Applied only when ItemScalingConfig is used
+    ITEM_BONUS_CLASSIC_REDUCED_CASTER_DPS       = 54,             // Classic 1.60 (WoW Forever): no value, the weapon deals a caster weapon's share of its damage table
 };
 
 enum class ItemCollectionType : uint8
@@ -1695,7 +1696,10 @@ enum MapDifficultyResetInterval : uint8
 {
     MAP_DIFFICULTY_RESET_ANYTIME    = 0,
     MAP_DIFFICULTY_RESET_DAILY      = 1,
-    MAP_DIFFICULTY_RESET_WEEKLY     = 2
+    MAP_DIFFICULTY_RESET_WEEKLY     = 2,
+    MAP_DIFFICULTY_RESET_THREE_DAYS = 3,
+    MAP_DIFFICULTY_RESET_FIVE_DAYS = 4,
+    MAP_DIFFICULTY_RESET_TWICE_WEEKLY = 5
 };
 
 enum class ModifierTreeType : int32

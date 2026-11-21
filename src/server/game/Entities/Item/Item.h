@@ -95,6 +95,7 @@ struct BonusData
     bool CanDisenchant;
     bool CanScrap;
     bool CanSalvage;
+    bool ClassicReducedCasterDps;   // Classic 1.60 (WoW Forever): item flag or random suffix bonus, see Item::GetClassicWeaponDPS
     bool CanRecraft;
     bool HasFixedLevel;
     bool CannotTradeBindOnPickup;
@@ -339,8 +340,8 @@ class TC_GAME_API Item : public Object
         // Update States
         ItemUpdateState GetState() const { return uState; }
         void SetState(ItemUpdateState state, Player* forplayer = nullptr);
-        bool IsInUpdateQueue() const { return uQueuePos != -1; }
-        uint16 GetQueuePos() const { return uQueuePos; }
+        bool IsInUpdateQueue() const { return _updateQueueOwner != nullptr; }
+        size_t GetQueuePos() const { return uQueuePos; }
         void FSetState(ItemUpdateState state)               // forced
         {
             uState = state;
@@ -352,6 +353,8 @@ class TC_GAME_API Item : public Object
         bool IsConjuredConsumable() const { return GetTemplate()->IsConjuredConsumable(); }
         uint32 GetQuality() const { return _bonusData.Quality; }
         uint32 GetItemLevel(Player const* owner) const;
+        float GetClassicWeaponDPS(Player const* owner) const;
+        void GetClassicWeaponDamage(Player const* owner, float& minDamage, float& maxDamage) const;
         static uint32 GetItemLevel(ItemTemplate const* itemTemplate, BonusData const& bonusData, uint32 level, uint32 fixedLevel,
             int32 minItemLevel, int32 minItemLevelCutoff, int32 maxItemLevel, bool pvpBonus, uint32 azeriteLevel, uint32 overrideContentTuningId);
         int32 GetRequiredLevel() const;
@@ -474,7 +477,9 @@ class TC_GAME_API Item : public Object
         uint8 m_slot;
         Bag* m_container;
         ItemUpdateState uState;
-        int16 uQueuePos;
+        Player* _updateQueueOwner = nullptr;
+        size_t uQueuePos = 0;
+        void DetachFromUpdateQueue();
         bool mb_in_trade;                                   // true if item is currently in trade-window
         ObjectGuid m_refundRecipient;
         uint64 m_paidMoney;

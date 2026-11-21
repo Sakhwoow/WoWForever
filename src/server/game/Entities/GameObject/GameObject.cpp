@@ -966,6 +966,8 @@ void GameObject::AddToWorld()
             else
                 GetMap()->InsertGameObjectModel(*m_model);
         }
+        if (GetGoType() == GAMEOBJECT_TYPE_DOOR)
+            GetMap()->AddDoor(this);    // published for paths searched off the map thread (Map::PublishClosedDoors)
 
         EnableCollision(toggledState);
         WorldObject::AddToWorld();
@@ -984,6 +986,7 @@ void GameObject::RemoveFromWorld()
         if (m_model)
             if (GetMap()->ContainsGameObjectModel(*m_model))
                 GetMap()->RemoveGameObjectModel(*m_model);
+        GetMap()->RemoveDoor(this);
 
         // If linked trap exists, despawn it
         if (GameObject* linkedTrap = GetLinkedTrap())
@@ -2410,6 +2413,14 @@ bool GameObject::ActivateToQuest(Player const* target) const
             if (getLootState() == GO_NOT_READY)
                 return false;
 
+            // Excavation Tools also drops the item that offers quest 86613.
+            // Enable the first interaction before the collection objective exists.
+            if (GetEntry() == 665282 && target->GetQuestStatus(86613) == QUEST_STATUS_NONE
+                && !target->HasItemCount(278049, 1, true))
+                if (Quest const* quest = sObjectMgr->GetQuestTemplate(86613))
+                    if (target->CanTakeQuest(quest, false))
+                        return true;
+
             // scan GO chest with loot including quest items
             if (target->GetQuestStatus(GetGOInfo()->chest.questID) == QUEST_STATUS_INCOMPLETE
                 || LootTemplates_Gameobject.HaveQuestLootForPlayer(GetGOInfo()->chest.chestLoot, target)
@@ -3286,10 +3297,13 @@ void GameObject::Use(Unit* user, bool ignoreCastInProgress /*= false*/)
                 if (targetPlayer->GetLevel() < targetLevels->MaxLevel)
                     return;
 
-            if (info->entry == 194097)
-                spellId = 61994;                            // Ritual of Summoning
-            else
-                spellId = 59782;                            // Summoning Stone Effect
+            // Classic 1.60 (WoW Forever): meeting stones don't summon; Blizzard ruled summoning stones out ("easy quick access to
+            // teleports shrink the world"). A warlock's Ritual of Summoning is the only summon. The Wrath summoning spell 59782 is not
+            // in the Forever client either.
+            if (info->entry != 194097)
+                return;
+
+            spellId = 61994;                                // Ritual of Summoning
 
             break;
         }
@@ -4195,6 +4209,8 @@ void GameObject::EnableCollision(bool enable)
         GetMap()->InsertGameObjectModel(*m_model);*/
 
     m_model->EnableCollision(enable);
+    if (IsInWorld() && GetGoType() == GAMEOBJECT_TYPE_DOOR)
+        GetMap()->MarkClosedDoorsChanged();
 }
 
 void GameObject::UpdateModel()
@@ -4221,6 +4237,8 @@ void GameObject::UpdateModel()
         if (modelCollisionEnabled)
             m_model->EnableCollision(modelCollisionEnabled);
     }
+    if (GetGoType() == GAMEOBJECT_TYPE_DOOR)
+        GetMap()->MarkClosedDoorsChanged();
 
     switch (GetGoType())
     {
@@ -4436,6 +4454,8 @@ void GameObject::UpdateModelPosition()
         GetMap()->RemoveGameObjectModel(*m_model);
         m_model->UpdatePosition();
         GetMap()->InsertGameObjectModel(*m_model);
+        if (GetGoType() == GAMEOBJECT_TYPE_DOOR)
+            GetMap()->MarkClosedDoorsChanged();
     }
 }
 
@@ -4720,6 +4740,7 @@ public:
     int64 GetPackedRotation() const override { return _owner->GetPackedLocalRotation(); }
     float GetScale() const override { return _owner->GetObjectScale(); }
     void DebugVisualizeCorner(G3D::Vector3 const& corner) const override { _owner->SummonCreature(1, corner.x, corner.y, corner.z, 0, TEMPSUMMON_MANUAL_DESPAWN); }
+    bool IsDoor() const override { return _owner->GetGoType() == GAMEOBJECT_TYPE_DOOR; }
 
 private:
     GameObject* _owner;

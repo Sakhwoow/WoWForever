@@ -487,7 +487,6 @@ m_spellValue(new SpellValue(m_spellInfo, caster)), _spellEvent(nullptr)
     m_executedCurrently = false;
     m_delayStart = 0;
     m_delayMoment = 0;
-    m_delayAtDamageCount = 0;
 
     m_applyMultiplierMask = 0;
     memset(m_damageMultipliers, 0, sizeof(m_damageMultipliers));
@@ -3023,8 +3022,14 @@ void Spell::TargetInfo::DoDamageAndTriggers(Spell* spell)
             // item spells (spell hit of non-damage spell may also activate items, for example seal of corruption hidden hit)
             if (caster->GetTypeId() == TYPEID_PLAYER && (procSpellType & (PROC_SPELL_TYPE_DAMAGE | PROC_SPELL_TYPE_NO_DMG_HEAL)))
             {
+                // Classic 1.60 (WoW Forever): an ability that requires a shield (Shield Slam, Shield Bash) strikes with the shield, so a weapon's
+                // chance-on-hit spell and its combat enchant never hear it; equip auras still do. Fiery Blaze 0 of 617 Shield Slams and 0 of
+                // 78 Shield Bashes against 212 of 1,517 white hits; Rock on Stick 0 of 157 Shield Slams (wowsims/forever, MIT, docs/evidence
+                // EV-0021, docs/rulings R-0041).
+                bool const requiresShield = spell->m_spellInfo->EquippedItemClass == ITEM_CLASS_ARMOR
+                    && (spell->m_spellInfo->EquippedItemSubClassMask & (1 << ITEM_SUBCLASS_ARMOR_SHIELD));
                 if (spell->m_spellInfo->DmgClass == SPELL_DAMAGE_CLASS_MELEE || spell->m_spellInfo->DmgClass == SPELL_DAMAGE_CLASS_RANGED)
-                    if (!spell->m_spellInfo->HasAttribute(SPELL_ATTR0_CANCELS_AUTO_ATTACK_COMBAT) && !spell->m_spellInfo->HasAttribute(SPELL_ATTR4_SUPPRESS_WEAPON_PROCS))
+                    if (!spell->m_spellInfo->HasAttribute(SPELL_ATTR0_CANCELS_AUTO_ATTACK_COMBAT) && !spell->m_spellInfo->HasAttribute(SPELL_ATTR4_SUPPRESS_WEAPON_PROCS) && !requiresShield)
                         caster->ToPlayer()->CastItemCombatSpell(*spellDamageInfo);
             }
         }
@@ -4527,7 +4532,16 @@ void Spell::finish(SpellCastResult result)
 
     // Stop Attack for some spells
     if (m_spellInfo->HasAttribute(SPELL_ATTR0_CANCELS_AUTO_ATTACK_COMBAT))
+    {
         unitCaster->AttackStop();
+        // Classic Scatter Shot must also stop Auto Shot. AttackStop only
+        // clears the melee victim, leaving the ranged autorepeat running.
+        if (m_spellInfo->Id == 19503 && m_spellInfo->HasAttribute(SPELL_ATTR15_UNK13)
+            && m_spellInfo->SpellFamilyName == SPELLFAMILY_HUNTER && unitCaster->GetClass() == CLASS_HUNTER)
+            if (Spell const* autoShot = unitCaster->GetCurrentSpell(CURRENT_AUTOREPEAT_SPELL))
+                if (autoShot->GetSpellInfo()->Id == 75)
+                    unitCaster->CancelAutoRepeatSpell();
+    }
 }
 
 template<class T>
@@ -5666,7 +5680,11 @@ void Spell::TakePower()
         {
             ObjectGuid targetGUID = m_targets.GetUnitTargetGUID();
             if (!targetGUID.IsEmpty())
-                hit = std::ranges::any_of(m_UniqueTargetInfo, [&](TargetInfo const& targetInfo) { return targetInfo.TargetGUID == targetGUID && targetInfo.MissCondition == SPELL_MISS_NONE; });
+                hit = std::ranges::any_of(m_UniqueTargetInfo, [&](TargetInfo const& targetInfo)
+                {
+                    // Classic 1.60: a blocked hit landed (partly blocked damage), it is no miss
+                    return targetInfo.TargetGUID == targetGUID && (targetInfo.MissCondition == SPELL_MISS_NONE || targetInfo.MissCondition == SPELL_MISS_BLOCK);
+                });
         }
     }
 
@@ -5682,6 +5700,16 @@ void Spell::TakePower()
             //lower spell cost on fail (by talent aura)
             if (Player* modOwner = unitCaster->GetSpellModOwner())
                 modOwner->ApplySpellMod(m_spellInfo, SpellModOp::PowerCostOnMiss, cost.Amount);
+
+            // Classic 1.60 (WoW Forever): an ability flagged Discount Power On Miss whose target misses, dodges, parries or is immune
+            // pays a fifth of its rage, energy or focus (80% back) and keeps the combo points it would spend. A failed Ferocious Bite
+            // spent 6.1 to 6.7 of its 35 energy on 5 avoided bites and kept its combo points (wowsims/forever, MIT,
+            // sim/core/spelldata/attributes.go MissRefund, docs/evidence EV-0031). The flag is on nearly every warrior, rogue and feral
+            // ability.
+            if (cost.Power == POWER_COMBO_POINTS)
+                continue;
+            if (cost.Power == POWER_RAGE || cost.Power == POWER_ENERGY || cost.Power == POWER_FOCUS)
+                cost.Amount -= CalculatePct(cost.Amount, 80);
         }
 
         if (cost.Power == POWER_RUNES)
@@ -5985,6 +6013,9 @@ void Spell::HandleEffects(Unit* pUnitTarget, Item* pItemTarget, GameObject* pGoT
     effectInfo = &spellEffectInfo;
 
     effectValue = CalculateDamage(spellEffectInfo, unitTarget, &variance);
+    // Classic 1.60: a physical effect already rolled its base points (SpellEffectInfo::CalcValue); the handler must not roll it again
+    if (!spellEffectInfo.ClassicRollsWholeAmount())
+        variance = 0.0f;
 
     bool preventDefault = CallScriptEffectHandlers(spellEffectInfo.EffectIndex, mode);
 
@@ -6377,6 +6408,41 @@ SpellCastResult Spell::CheckCast(bool strict, int32* param1 /*= nullptr*/, int32
             return castResult;
     }
 
+    // Classic: Corrupted Mind (Loatheb). His 29201 gives every healer an aura (29185 / 29194 / 29196 / 29198) whose next heal
+    // triggers 29184 / 29195 / 29197 / 29199: SPELL_AURA_OVERRIDE_CLASS_SCRIPTS with misc value 4327, for 60 s. While that lasts the
+    // caster's healing spells fizzle (VMaNGOS Spell::CheckCast, "Loatheb Corrupted Mind spell failed"). Nothing here read misc value
+    // 4327, so every healer healed through the whole fight. Spells from items (potions, healthstones, bandages) still work.
+    if (!IsTriggered() && !m_CastItem)
+    {
+        if (Unit const* unitCaster = m_caster->ToUnit())
+        {
+            bool corruptedMind = false;
+            for (AuraEffect const* aurEff : unitCaster->GetAuraEffectsByType(SPELL_AURA_OVERRIDE_CLASS_SCRIPTS))
+                if (aurEff->GetMiscValue() == 4327)
+                    corruptedMind = true;
+            // Holy Shock (20473 / 20929 / 20930) is a dummy whose script casts the rank's heal on a friendly target (triggered, so not
+            // checked here): on a friend it is a heal like any other. naxx_loatheb af40 (1119): locked paladins healed with it every minute.
+            uint32 const holyShockFirst = m_spellInfo->GetFirstRankSpell()->Id;
+            if (corruptedMind && (holyShockFirst == 20473 || m_spellInfo->Id == 20929 || m_spellInfo->Id == 20930))
+                if (Unit const* friendTarget = m_targets.GetUnitTarget())
+                    if (unitCaster->IsFriendlyTo(friendTarget))
+                    {
+                        TC_LOG_INFO("spells.corruptedmind", "Corrupted Mind: {} ({}) casts Holy Shock {} on a friend, it fizzles", unitCaster->GetName(),
+                            unitCaster->GetGUID().ToString(), m_spellInfo->Id);
+                        return SPELL_FAILED_FIZZLE;
+                    }
+            if (corruptedMind)
+                for (SpellEffectInfo const& spellEffectInfo : m_spellInfo->GetEffects())
+                    if (spellEffectInfo.IsEffect(SPELL_EFFECT_HEAL) || spellEffectInfo.IsEffect(SPELL_EFFECT_HEAL_PCT)
+                        || spellEffectInfo.IsEffect(SPELL_EFFECT_HEAL_MAX_HEALTH) || spellEffectInfo.IsAura(SPELL_AURA_PERIODIC_HEAL))
+                    {
+                        TC_LOG_INFO("spells.corruptedmind", "Corrupted Mind: {} ({}) casts {} ({}), it fizzles", unitCaster->GetName(),
+                            unitCaster->GetGUID().ToString(), m_spellInfo->Id, (*m_spellInfo->SpellName)[DEFAULT_LOCALE]);
+                        return SPELL_FAILED_FIZZLE;
+                    }
+        }
+    }
+
     // script hook
     castResult = CallScriptCheckCastHandlers();
     if (castResult != SPELL_CAST_OK)
@@ -6594,7 +6660,19 @@ SpellCastResult Spell::CheckCast(bool strict, int32* param1 /*= nullptr*/, int32
                     float range = m_spellInfo->GetMaxRange(true, unitCaster, this) * 1.5f + objSize; // can't be overly strict
 
                     m_preGeneratedPath = std::make_unique<PathGenerator>(unitCaster);
-                    m_preGeneratedPath->SetPathLengthLimit(range);
+                    // The path's length is held to the range below, by its real length. A point budget of range / 4 (SetPathLengthLimit)
+                    // stood for it before, but the smoothed path steps less than 4 yd where the navmesh breaks into small polygons, as it
+                    // does along every shore: a charge of 18-23 yd that walks in 1x the straight distance ran out of points there and was
+                    // refused NOPATH (PC chargepath check 2026-11-17: Auberdine, Ratchet, Theramore, Booty Bay).
+                    // A charge takes the shortest way to its target. The slope cost (Pathfinding.SlopeCoefficient, 1.0 in the bot
+                    // configuration) and the road bonus shape walking routes; on a charge they made the path swing round banks and
+                    // slopes, so near water the caster ran along the shore and on uneven ground took a detour and missed the target
+                    // (Discord 2026-11-14, voldemargreed "bugs 5").
+                    m_preGeneratedPath->SetSlopeCoefficient(0.0f);
+                    m_preGeneratedPath->SetDisableRoadBonus(true);
+                    // A bot keeps out of water on its walks (PathGenerator::SetLiquidRouteCheck); its charge does not: the land-only search
+                    // sent a warrior bot charging a mob in the shallows round by the bank.
+                    m_preGeneratedPath->SetIgnoreLiquidRouteCheck(true);
 
                     // first try with raycast, if it fails fall back to normal path
                     bool result = m_preGeneratedPath->CalculatePath(target->GetPositionX(), target->GetPositionY(), target->GetPositionZ(), false);
@@ -6603,6 +6681,8 @@ SpellCastResult Spell::CheckCast(bool strict, int32* param1 /*= nullptr*/, int32
                     else if (!result || m_preGeneratedPath->GetPathType() & (PATHFIND_NOPATH | PATHFIND_INCOMPLETE))
                         return SPELL_FAILED_NOPATH;
                     else if (m_preGeneratedPath->IsInvalidDestinationZ(target)) // Check position z, if not in a straight line
+                        return SPELL_FAILED_NOPATH;
+                    else if (m_preGeneratedPath->GetPathLength() > range) // a detour longer than the charge reaches
                         return SPELL_FAILED_NOPATH;
 
                     m_preGeneratedPath->ShortenPathUntilDist(PositionToVector3(target->GetPosition()), objSize); // move back
@@ -6900,6 +6980,7 @@ SpellCastResult Spell::CheckCast(bool strict, int32* param1 /*= nullptr*/, int32
             }
             case SPELL_EFFECT_JUMP:
             case SPELL_EFFECT_JUMP_DEST:
+            case SPELL_EFFECT_JUMP_DEST_3:
             {
                 Unit* unitCaster = m_caster->ToUnit();
                 if (!unitCaster)
@@ -8364,9 +8445,8 @@ void Spell::Delayed() // only called in DealDamage()
     if (!unitCaster)
         return;
 
-    if (IsDelayableNoMore())                                 // Spells may only be delayed twice
-        return;
-
+    // Classic 1.60 (vanilla, wowsims/forever): every damaging hit pushes the cast back 500 ms, with no cap on the number of hits (the
+    // two-hit cap is a Wrath rule); the cast never goes back past its full cast time (below)
     //check pushback reduce
     int32 delaytime = 500;                                  // spellcasting delay is normally 500ms
 
@@ -8403,9 +8483,7 @@ void Spell::DelayedChannel()
     if (m_spellState != SPELL_STATE_CHANNELING)
         return;
 
-    if (IsDelayableNoMore())                                    // Spells may only be delayed twice
-        return;
-
+    // Classic 1.60: no cap on the number of hits that shorten a channel (see Spell::Delayed)
     //check pushback reduce
     // should be affected by modifiers, not take the dbc duration.
     int32 duration = ((m_channelDuration > 0) ? m_channelDuration : m_spellInfo->GetDuration());

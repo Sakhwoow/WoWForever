@@ -15,6 +15,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "Log.h"
 #include "TransmogMgr.h"
 #include "DB2Stores.h"
 #include "FlatSet.h"
@@ -141,7 +142,8 @@ bool IsValidTransmogOutfitSlotForItem(ItemTemplate const* item, TransmogOutfitSl
         case INVTYPE_HOLDABLE:
             return slot == TransmogOutfitSlot::WeaponOffHand || IsArtifactTransmogOutfitSlotOption(option);
         case INVTYPE_RANGED:
-            return (slot == TransmogOutfitSlot::WeaponMainHand && option == TransmogOutfitSlotOption::RangedWeapon) || IsArtifactTransmogOutfitSlotOption(option);
+            // Classic 1.60 client data: bows live in the ranged slot (TransmogOutfitSlotInfo 15), the only slot with the Ranged Weapon option
+            return slot == TransmogOutfitSlot::WeaponRanged || IsArtifactTransmogOutfitSlotOption(option);
         case INVTYPE_CLOAK:
             return slot == TransmogOutfitSlot::Back;
         case INVTYPE_2HWEAPON:

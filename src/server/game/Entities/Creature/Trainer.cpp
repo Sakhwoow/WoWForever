@@ -120,14 +120,22 @@ namespace Trainer
 
         WorldPackets::NPC::TrainerList trainerList;
         trainerList.TrainerGUID = npc->GetGUID();
-        trainerList.TrainerType = AsUnderlyingType(_type);
+        // Classic 1.60 pet trainers sell the hunter the pet abilities for money in the ordinary trainer window, with the trainer's
+        // name and portrait (official realm, Karrina Mekenda; lilmonixx, 2026-11-20). The client opens its pet training window
+        // (the pet's name, training point costs, empty with no pet out) for trainer type Pet, so a pet trainer is sent as a plain
+        // trainer. The server keeps the Pet type for its own checks (the bots never train there).
+        trainerList.TrainerType = AsUnderlyingType(_type == Type::Pet ? Type::None : _type);
         trainerList.TrainerID = _id;
         trainerList.Greeting = GetGreeting(locale);
         trainerList.Spells.reserve(_spells.size());
         for (Spell const& trainerSpell : _spells)
         {
             if (!player->IsSpellFitByClassAndRace(trainerSpell.SpellId))
+            {
+                TC_LOG_DEBUG("entities.player", "Trainer::SendSpells: trainer {} spell {} left out for player '{}' (race {} class {}): not fit by class and race",
+                    _id, trainerSpell.SpellId, player->GetName(), uint32(player->GetRace()), uint32(player->GetClass()));
                 continue;
+            }
 
             if (!sConditionMgr->IsObjectMeetingTrainerSpellConditions(_id, trainerSpell.SpellId, player))
             {
@@ -151,6 +159,8 @@ namespace Trainer
                     reqAbility = 0;
             trainerListSpell.Usable = AsUnderlyingType(GetSpellState(player, &trainerSpell));
             trainerListSpell.ReqLevel = trainerSpell.ReqLevel;
+            TC_LOG_DEBUG("entities.player", "Trainer::SendSpells: trainer {} spell {} for player '{}': state {} (0 known, 1 available, 2 unavailable)",
+                _id, trainerSpell.SpellId, player->GetName(), trainerListSpell.Usable);
         }
 
         player->SendDirectMessage(trainerList.Write());

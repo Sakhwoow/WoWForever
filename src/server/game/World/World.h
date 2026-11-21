@@ -123,6 +123,7 @@ enum WorldBoolConfigs : uint32
     CONFIG_INSTANCE_PERSIST_RAID_TRASH,
     CONFIG_MC_CORE_HOUNDS_LINKED,
     CONFIG_MC_SKIP_RUNES,
+    CONFIG_BWL_NEFARIAN_CAP_ADDS,
     CONFIG_INSTANCE_COMBAT_RES_LIMIT,
     CONFIG_CAST_UNSTUCK,
     CONFIG_ALLOW_GM_GROUP,
@@ -212,8 +213,13 @@ enum WorldBoolConfigs : uint32
     CONFIG_CLASSIC_SECURED_BAG_SLOTS_FOR_ALL,
     CONFIG_CLASSIC_FOREVER_CREATURE_HEALTH,
     CONFIG_CLASSIC_FOREVER_KILL_XP,
+    CONFIG_CLASSIC_DUNGEON_CARRY_XP_BLOCK,
     CONFIG_CLASSIC_AUTO_EQUIP_NEW_BAGS,
+    CONFIG_CLASSIC_FIRST_TAG_OWNS_MOB,
     CONFIG_CLASSIC_CREATURE_HEALTH_RAIDS,
+    CONFIG_FOREVER_VANILLA_AOE,
+    CONFIG_PATHFINDING_PREFER_ROADS,
+    CONFIG_CLASSIC_HARDCORE,
     BOOL_CONFIG_VALUE_COUNT
 };
 
@@ -245,6 +251,10 @@ enum WorldFloatConfigs : uint32
     CONFIG_MAX_VISIBILITY_DISTANCE_INSTANCE,
     CONFIG_MAX_VISIBILITY_DISTANCE_BATTLEGROUND,
     CONFIG_MAX_VISIBILITY_DISTANCE_ARENA,
+    CONFIG_PATHFINDING_ROAD_COST,
+    CONFIG_PATHFINDING_ROAD_COST_MOUNTED,
+    CONFIG_PATHFINDING_SLOPE_COEFFICIENT,
+    CONFIG_PATHFINDING_PET_LIQUID_COST,
     FLOAT_CONFIG_VALUE_COUNT
 };
 
@@ -455,6 +465,7 @@ enum WorldIntConfigs : uint32
     CONFIG_CLASSIC_RESPAWN_LEVEL_31_60_PCT,
     CONFIG_CLASSIC_CREATURE_HEALTH_RAISE_FROM_LEVEL,
     CONFIG_CLASSIC_CREATURE_HEALTH_RAISE_AT_60_PCT,
+    CONFIG_FOREVER_DAY_CYCLE_SPEED,
     INT_CONFIG_VALUE_COUNT
 };
 
@@ -593,6 +604,11 @@ class TC_GAME_API World
         static World* instance();
 
         static std::atomic<uint32> m_worldLoopCounter;
+
+        // True when called on the thread that runs startup and World::Update (the world thread),
+        // false on map update threads, network threads and before startup. Lets module code check
+        // that it may touch world-thread-only state, or queue the work for the next world tick.
+        static bool IsInWorldThread();
 
         WorldSession* FindSession(uint32 id) const;
         void AddSession(WorldSession* s);
