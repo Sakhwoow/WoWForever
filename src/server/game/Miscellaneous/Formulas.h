@@ -222,8 +222,23 @@ namespace Trinity
                 }
 
                 xpMod *= isBattleGround ? sWorld->getRate(RATE_XP_BG_KILL) : sWorld->getRate(RATE_XP_KILL);
-                if (creature && creature->m_PlayerDamageReq) // if players dealt less than 50% of the damage and were credited anyway (due to CREATURE_FLAG_EXTRA_NO_PLAYER_DAMAGE_REQ), scale XP gained appropriately (linear scaling)
-                    xpMod *= 1.0f - 2.0f * creature->m_PlayerDamageReq / creature->GetMaxHealth();
+                // if players dealt less than 50% of the damage and were credited anyway (due to CREATURE_FLAG_EXTRA_NO_PLAYER_DAMAGE_REQ), scale XP gained appropriately (linear scaling)
+                if (creature && creature->m_PlayerDamageReq)
+                {
+                    uint64 const maxHealth = creature->GetMaxHealth();
+                    // Forever: the requirement is reset to half of the creature's health, so a creature that was healed back
+                    // above that point (or bad data) makes the multiplier negative; uint32(gain * negative) wrapped to about
+                    // 4.29 billion XP. Such a kill took a level 30-40 character straight to the level cap.
+                    float const damageMultiplier = maxHealth ? 1.0f - 2.0f * creature->m_PlayerDamageReq / maxHealth : 1.0f;
+                    if (damageMultiplier > 0.0f)
+                        xpMod *= damageMultiplier;
+                }
+
+                // Never let a broken multiplier (negative, NaN, or absurd value from a data/config bug) become billions of XP
+                if (!(xpMod > 0.0f))
+                    xpMod = 0.0f;
+                else if (xpMod > 100.0f)
+                    xpMod = 100.0f;
 
                 gain = uint32(gain * xpMod);
             }

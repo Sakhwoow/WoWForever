@@ -167,8 +167,14 @@ inline void KillRewarder::_RewardXP(Player* player, float rate)
     if (xp)
     {
         // 4.2.2. Apply auras modifying rewarded XP (SPELL_AURA_MOD_XP_PCT and SPELL_AURA_MOD_XP_FROM_CREATURE_TYPE).
-        xp *= player->GetTotalAuraMultiplier(SPELL_AURA_MOD_XP_PCT);
-        xp *= player->GetTotalAuraMultiplierByMiscValue(SPELL_AURA_MOD_XP_FROM_CREATURE_TYPE, int32(_victim->GetCreatureType()));
+        // Forever: a negative or broken multiplier used to wrap the uint32 and hand out billions of XP
+        float auraMultiplier = player->GetTotalAuraMultiplier(SPELL_AURA_MOD_XP_PCT)
+            * player->GetTotalAuraMultiplierByMiscValue(SPELL_AURA_MOD_XP_FROM_CREATURE_TYPE, int32(_victim->GetCreatureType()));
+        if (!(auraMultiplier > 0.0f))
+            auraMultiplier = 0.0f;
+        else if (auraMultiplier > 100.0f)
+            auraMultiplier = 100.0f;
+        xp = uint32(float(xp) * auraMultiplier);
 
         // 4.2.3. Give XP to player.
         player->GiveXP(xp, _victim, _groupRate);

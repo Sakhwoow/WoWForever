@@ -2251,6 +2251,16 @@ void Player::GiveXP(uint32 xp, Unit* victim, float group_rate)
 
     sScriptMgr->OnGivePlayerXP(this, xp, victim);
 
+    // Forever: no single award may be worth more than a few levels. A broken multiplier (negative/NaN from auras,
+    // creature data or a config) used to wrap the uint32 and hand out billions of XP, taking a character from the
+    // 30s straight to the level cap. Logged only when it actually happens, so the log stays quiet in normal play.
+    if (uint32 const cap = std::max<uint32>(GetXPForNextLevel(), 1000) * 3; xp > cap)
+    {
+        TC_LOG_ERROR("entities.player", "Player '{}' ({}) was awarded {} XP at once (level {}, victim {}), clamped to {}",
+            GetName(), GetGUID().ToString(), xp, GetLevel(), victim ? victim->GetGUID().ToString() : std::string("none"), cap);
+        xp = cap;
+    }
+
     // XP to money conversion processed in Player::RewardQuest
     if (IsMaxLevel())
         return;
@@ -6960,11 +6970,21 @@ void Player::CheckAreaExplore()
         return;
     }
 
-    uint32 offset = areaEntry->AreaBit / PLAYER_EXPLORED_ZONES_BITS;
-    uint64 val = UI64LIT(1) << (areaEntry->AreaBit % PLAYER_EXPLORED_ZONES_BITS);
+    // Forever: a negative AreaBit makes the shift below undefined, and an AreaBit outside the client's explored-zone
+    // bit field (the new Classic 1.60 zones carry values like 12221 or 13180) used to extend the field and grant XP for
+    // a location the client cannot store. Skip such AreaTable rows instead of touching the bit field at all.
+    if (areaEntry->AreaBit < 0
+        || uint32(areaEntry->AreaBit) / PLAYER_EXPLORED_ZONES_BITS >= m_activePlayerData->BitVectors->Values[PLAYER_DATA_FLAG_EXPLORED_ZONES_INDEX].Values.size())
+    {
+        TC_LOG_DEBUG("entities.player", "Player '{}' ({}) discovered area {} with AreaBit {} outside the explored-zone field, ignored",
+            GetName(), GetGUID().ToString(), areaId, int32(areaEntry->AreaBit));
+        return;
+    }
 
-    if (offset >= m_activePlayerData->BitVectors->Values[PLAYER_DATA_FLAG_EXPLORED_ZONES_INDEX].Values.size()
-        || !(m_activePlayerData->BitVectors->Values[PLAYER_DATA_FLAG_EXPLORED_ZONES_INDEX].Values[offset] & val))
+    uint32 offset = uint32(areaEntry->AreaBit) / PLAYER_EXPLORED_ZONES_BITS;
+    uint64 val = UI64LIT(1) << (uint32(areaEntry->AreaBit) % PLAYER_EXPLORED_ZONES_BITS);
+
+    if (!(m_activePlayerData->BitVectors->Values[PLAYER_DATA_FLAG_EXPLORED_ZONES_INDEX].Values[offset] & val))
     {
         AddExploredZones(offset, val);
 
@@ -6974,6 +6994,9 @@ void Player::CheckAreaExplore()
         // sound), with 0 experience at max level or in areas without a level (sniffs of the official beta: level 6 area 55 XP, level 0 area 0)
         Optional<ContentTuningLevels> areaLevels = sDB2Manager.GetContentTuningData(areaEntry->ContentTuningID, m_playerData->CtrOptions->ConditionalFlags);
         int16 explorationLevel = areaLevels ? std::min(std::max(int16(GetLevel()), areaLevels->MinLevel), areaLevels->MaxLevel) : int16(areaEntry->ExplorationLevel);
+        // Forever: a broken ExplorationLevel (a garbage byte read from a shifted row of the new 1.60 zones) must never
+        // become an area level far above the character
+        explorationLevel = std::min<int16>(std::max<int16>(explorationLevel, 0), int16(MAX_LEVEL));
         {
             if (IsMaxLevel() || explorationLevel <= 0)
             {
@@ -7007,7 +7030,17 @@ void Player::CheckAreaExplore()
                     XP = std::max(minScaledXP, XP);
                 }
 
-                XP += XP * GetTotalAuraMultiplier(SPELL_AURA_MOD_EXPLORATION_EXPERIENCE);
+                // Forever: "XP += XP * multiplier" doubled every discovery even without an aura (the total multiplier is
+                // 1.0 then, while the official sniffs show exactly the base value) and wrapped the uint32 into billions of
+                // XP when the multiplier was negative or broken. A discovery is also checked on every movement packet, so
+                // any repeat awarding of the same area has to stay harmless.
+                float exploreMultiplier = GetTotalAuraMultiplier(SPELL_AURA_MOD_EXPLORATION_EXPERIENCE);
+                if (!(exploreMultiplier > 0.0f))
+                    exploreMultiplier = 0.0f;
+                else if (exploreMultiplier > 100.0f)
+                    exploreMultiplier = 100.0f;
+
+                XP = uint32(float(XP) * exploreMultiplier);
 
                 GiveXP(XP, nullptr);
                 SendExplorationExperience(areaId, XP);
