@@ -152,22 +152,22 @@ TEST_CASE("GroupFight: after the leader's Pull back the rest hold until his Atta
     CHECK(PullWaitPending(1000, 0, 800, 5000));
 }
 
-TEST_CASE("GroupFight: damage dealers take the leader's order, the priority add, the tank's target, then the leader's", "[groupfight]")
+TEST_CASE("GroupFight: damage dealers take the leader's order, the priority add, the leader's target, then the tank's", "[groupfight]")
 {
     std::vector<Candidate> c(5, Mob(10.f));
     c[0].dist = 2.f;                 // nearest: a mob on a member
-    c[1].leader_target = true;
-    c[2].tank_target = true;
+    c[1].tank_target = true;
+    c[2].leader_target = true;
     c[3].priority_add = true;
     c[4].leader_ordered = true;
     CHECK(PickTarget(c) == 4);
     c[4].leader_ordered = false;
     CHECK(PickTarget(c) == 3);
     c[3].priority_add = false;
-    CHECK(PickTarget(c) == 2);
-    c[2].tank_target = false;
+    CHECK(PickTarget(c) == 2);       // the player's target is the group's kill target (Saul, 2026-11-17)
+    c[2].leader_target = false;
     CHECK(PickTarget(c) == 1);
-    c[1].leader_target = false;
+    c[1].tank_target = false;
     CHECK(PickTarget(c) == 0);
 }
 
@@ -226,6 +226,25 @@ TEST_CASE("GroupFight: a tank takes a mob off a non-tank first, nearest first", 
     CHECK(PickTankTarget(c) == 0);
 }
 
+TEST_CASE("GroupFight: among the loose mobs the tank takes the leader's own target first", "[groupfight]")
+{
+    // Saul, #bot-feedback 2026-11-17: the player opened on a mob, it ran at him, and the tank took the nearest other loose mob.
+    std::vector<TankCandidate> c(3);
+    c[0].mob = Mob(4.f);
+    c[0].on_non_tank = true;         // nearest: a mob on the hunter's pet
+    c[1].mob = Mob(18.f);
+    c[1].on_non_tank = true;
+    c[1].mob.leader_target = true;   // the player's own target, on the player
+    c[2].mob = Mob(9.f);
+    c[2].on_non_tank = true;
+    CHECK(PickTankTarget(c) == 1);
+    c[1].mob.crowd_controlled = true;   // never break a hold for it: the nearest loose one
+    CHECK(PickTankTarget(c) == 0);
+    c[1].mob.crowd_controlled = false;
+    c[1].on_non_tank = false;        // already on the tank: the loose ones come first
+    CHECK(PickTankTarget(c) == 0);
+}
+
 TEST_CASE("GroupFight: idle in the fight is a fault after 3 s, not for healers or controlled bots", "[groupfight]")
 {
     CHECK_FALSE(IdleFault(Mode::Fight, false, false, 1000, 1000 + kIdleFaultMs));
@@ -235,4 +254,23 @@ TEST_CASE("GroupFight: idle in the fight is a fault after 3 s, not for healers o
     CHECK_FALSE(IdleFault(Mode::Ordered, false, false, 1000, 10000));
     CHECK_FALSE(IdleFault(Mode::Off, false, false, 1000, 10000));
     CHECK_FALSE(IdleFault(Mode::Fight, false, false, 0, 10000));
+}
+
+TEST_CASE("GroupFight: a healer between heals aims at the leader's target, else the tank's", "[groupfight]")
+{
+    using Playerbot::GroupFight::HealerFillerTarget;
+    using Playerbot::GroupFight::HealerTarget;
+
+    // VempirE, #bot-feedback 2026-11-20: questing with its player (no tank), the healer hit nothing, even on Attack.
+    REQUIRE(HealerFillerTarget(false, true, false, true, false) == HealerTarget::Leader);
+    // The group's fight: the leader's target (the one Attack names) before the tank's.
+    REQUIRE(HealerFillerTarget(false, true, true, true, true) == HealerTarget::Leader);
+    REQUIRE(HealerFillerTarget(false, true, false, false, true) == HealerTarget::Tank);
+    // Its own fight with no group fight (a raid boss, a hold): the tank's victim first, as in the dungeon seeding before.
+    REQUIRE(HealerFillerTarget(false, false, true, true, true) == HealerTarget::Tank);
+    REQUIRE(HealerFillerTarget(false, false, true, true, false) == HealerTarget::Leader);
+    // Out of every fight, nothing; and never in a battleground.
+    REQUIRE(HealerFillerTarget(false, false, false, true, true) == HealerTarget::None);
+    REQUIRE(HealerFillerTarget(true, true, true, true, true) == HealerTarget::None);
+    REQUIRE(HealerFillerTarget(false, true, true, false, false) == HealerTarget::None);
 }

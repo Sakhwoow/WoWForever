@@ -126,10 +126,14 @@ struct classic_boss_gluth : public ScriptedAI
 
     void MoveInLineOfSight(Unit* pWho) override
     {
-        // He should aggro just at the edge of the sewer pipe players jump from
+        // He should aggro just at the edge of the sewer pipe players jump from. Only a player in his own room: the
+        // 49 y reach goes through the wall into Patchwerk's room (one floor lower, ~294 against his ~297.8), and a
+        // raid fighting Patchwerk pulled him in (Karrz 11-15: "2 bosses on us").
         if (pWho->GetTypeId() == TYPEID_PLAYER
             && !me->IsInCombat()
             && me->IsWithinDistInMap(pWho, 49.0f)
+            && std::abs(pWho->GetPositionZ() - me->GetPositionZ()) < 2.5f
+            && me->IsWithinLOSInMap(pWho)
             && !pWho->HasAuraType(SPELL_AURA_FEIGN_DEATH))
         {
             AttackStart(pWho);
@@ -264,7 +268,8 @@ struct classic_boss_gluth : public ScriptedAI
                 {
                     m_events.Repeat(5s);
                     float curZ = me->GetPositionZ(); // encounter floor at ~297.78f
-                    if (curZ < 293.0f || curZ > 300.0f) // avoid getting stuck in wall on pull
+                    // avoid getting stuck in wall on pull; his room floor runs 296.7-298, Patchwerk's 293.7-294.1: below 295.3 he has left his room
+                    if (curZ < 295.3f || curZ > 300.0f)
                     {
                         EnterEvadeMode();
                         return;
@@ -290,7 +295,7 @@ struct classic_boss_gluth : public ScriptedAI
     void DoSearchZombieChow()
     {
         std::list<Creature*> chowableZombies;
-        me->GetCreatureListWithEntryInGrid(chowableZombies, NPC_GLUTH_ZOMBIE_CHOW, 15.0f);
+        me->GetCreatureListWithEntryInGrid(chowableZombies, NPC_GLUTH_ZOMBIE_CHOW, 15.0f);   // a wider search (it adds both combat reaches); the gap test below decides
         if (chowableZombies.empty())
             return;
 
@@ -299,8 +304,11 @@ struct classic_boss_gluth : public ScriptedAI
             if (!chowableZombie->IsAlive())
                 continue;
 
-            // Using 2d distance, should do fine
-            if (chowableZombie->GetDistance2d(me) < 15.0f) // distance based on dbc for spellid 289236
+            // 2D distance between the two bodies, as VMaNGOS measures it: centre distance less both bounding radii (15 y = the radius of
+            // Zombie Chow Search 28236). TC's GetDistance2d takes off the combat reaches instead, and his is 12 y, so he ate every chow
+            // within about 28.5 y of his centre instead of about 17 y (his bounding radius is 1.5 y, a chow's 0.65 y).
+            float const bodyGap = chowableZombie->GetExactDist2d(me) - me->GetBoundingRadius() - chowableZombie->GetBoundingRadius();
+            if (bodyGap < 15.0f)
             {
                 me->SetFacingToObject(chowableZombie);
                 Unit::Kill(me, chowableZombie, false);

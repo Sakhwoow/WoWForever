@@ -55,8 +55,13 @@ struct Plan
 
 bool Matches(Who who, Member const& m, Player* mainTank);
 float Dist2D(float ax, float ay, float bx, float by);
+// The distance from (px, py) to the segment from (ax, ay) to (bx, by).
+float SegmentDist2D(float ax, float ay, float bx, float by, float px, float py);
 bool InsideAny(std::vector<Circle> const& circles, float x, float y, float margin);
 bool Controlled(Unit* u);
+// Why the last Usable() refused a point (0 = it did not), and that reason's name for a log line.
+extern int g_usableWhy;
+char const* UsableWhyName(int why);
 // A point the bot can actually stand on and walk to (height, line of sight, a complete path).
 // Path queries are capped per plan pass (all bots together, see ResetPathProbes): urgent probes (leaving a hazard,
 // a carrier run, scripted mechanics, a breath / cone) may use the whole cap, the rest (spread, role spots, stay near)
@@ -65,12 +70,16 @@ bool Controlled(Unit* u);
 // from where it stands (the path walks round what is between) and it need not be in the fight area round the main tank (the row is wider).
 bool Usable(Player* bot, float x, float y, float zHint, float& outZ, bool urgent = false, bool hazard = false, bool fixedPlace = false);
 void ResetPathProbes();
-bool SetMove(RaidOrder& out, float x, float y, float z, char const* reason);
+// `urgent`: see RaidOrder::move_urgent (the move is a way out of something that kills where the bot stands).
+bool SetMove(RaidOrder& out, float x, float y, float z, char const* reason, bool urgent = false);
 // Best nearby point that increases the distance to every raid member in `others`.
 // Points inside `avoid` (the bot's hazard circles) are skipped.
 bool Clearest(Player* bot, std::vector<Player*> const& others, float wanted, RaidOrder& out, char const* reason,
               std::vector<Circle> const& avoid, bool urgent);
 uint32_t KnownRank(Player* p, Ranks const& ranks);
+// The ranged opener a bot pulls with, one shot from range (0: none it knows). Hunters first (order 0), then mages (1), then warlocks (2);
+// order 3 for every other class.
+uint32_t RangedPullSpell(Player* p, int& order);
 bool Ready(Player* p, uint32_t spellId, Unit* target, bool hostile);
 bool Busy(Player* p);
 uint32_t Stacks(Unit* u, uint32_t aura);
@@ -84,6 +93,8 @@ bool TauntImmune(Unit const* enemy);
 void EnemySchoolMasks(Unit* enemy, Unit const* caster, uint8_t& prefer, uint8_t& avoid, uint8_t* reflect = nullptr);
 Unit const* SchoolReferenceCaster(Plan const& plan);
 uint8_t MemberDamageSchools(Member const& m, Player* mainTank);
+// The school(s) of a caster's main nuke by its spec (a frost mage: frost); MemberDamageSchools for everybody else.
+uint8_t MemberMainSchools(Member const& m, Player* mainTank);
 
 // One election round for a plan: no two bots get the same job.
 struct Election
@@ -111,11 +122,15 @@ void MechanicsPrePull(Plan& plan, std::unordered_map<uint64_t, RaidOrder>& order
 void NaxxPrePull(Plan& plan, std::unordered_map<uint64_t, RaidOrder>& orders, std::ostringstream& dump);
 
 bool NaxxMechanicsMove(Plan const& plan, Member const& self, uint32_t now, RaidOrder& out);
+// After PublishTargets on map 533: per-bot target limits a scripted mechanic sets (Thaddius' platform split).
+void NaxxPostTargets(Plan& plan, std::unordered_map<uint64_t, RaidOrder>& orders);
 void NaxxMechanicsElect(Election& e, uint32_t now);
 void BwlMechanicsElect(Election& e, uint32_t now);
 void BwlPrePull(Plan& plan, std::unordered_map<uint64_t, RaidOrder>& orders, std::ostringstream& dump, uint32_t now);
 // A boss fight script (RaidFightScript.h): after the rule passes, overwrites the DPS bots' target and start wait for the scripted boss.
 void ApplyFightScript(Plan& plan, std::unordered_map<uint64_t, RaidOrder>& orders, uint32_t now, std::ostringstream& dump);
+// A boss that joined the fight late (Nefarian's landing) and that the DPS still keep off until a tank has held it (RaidFightScript.cpp).
+bool LateBossHeld(uint64_t enemyGuidLow);
 // Zul'Gurub (RaidMechanics_ZG.cpp): the enemy a scripted fight's DPS must kill now whatever the kill order says (a Son of Hakkar before Blood
 // Siphon; nullptr = none), and the movement the fight needs (the raid gathers on that Son as it dies).
 Unit* ZgForcedFocus(Plan const& plan, uint32_t now);

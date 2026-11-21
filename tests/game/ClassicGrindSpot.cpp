@@ -78,3 +78,31 @@ TEST_CASE("GrindSpot: a crowd of one level spreads over every camp of the zone",
         used.insert(PickGrindSpot(spots, 0, -3796.f, -777.f, 22, bot));
     CHECK(used.size() == 4);
 }
+
+TEST_CASE("GrindSpot: the mob supply counts the camps of the level in reach", "[grindspot]")
+{
+    std::vector<GrindSample> s;
+    for (int k = 0; k < 3; ++k)
+    {
+        auto c = Camp(0, 2000.f + float(k) * 180.f, -4000.f, 55, 12);
+        s.insert(s.end(), c.begin(), c.end());
+    }
+    auto far = Camp(0, 2000.f, -2000.f, 55, 12);       // 2000 yards away
+    auto grey = Camp(0, 2100.f, -4100.f, 45, 12);      // ten levels lower
+    auto other_map = Camp(1, 2000.f, -4000.f, 55, 12);
+    s.insert(s.end(), far.begin(), far.end());
+    s.insert(s.end(), grey.begin(), grey.end());
+    s.insert(s.end(), other_map.begin(), other_map.end());
+    auto spots = BuildGrindSpots(s);
+    CHECK(MobSupplyNear(spots, 0, 2100.f, -4000.f, 55, 600.f) == 36);
+    CHECK(MobSupplyNear(spots, 0, 2100.f, -4000.f, 57, 600.f) == 36);   // within the level spread
+    CHECK(MobSupplyNear(spots, 0, 2100.f, -4000.f, 30, 600.f) == 0);
+}
+
+TEST_CASE("GrindSpot: the supply cap is one bot per MobsPerBot mobs, with a floor", "[grindspot]")
+{
+    CHECK(SupplyBotCap(150, 10, 5) == 15);
+    CHECK(SupplyBotCap(36, 10, 5) == 5);     // the floor
+    CHECK(SupplyBotCap(0, 10, 5) == 5);
+    CHECK(SupplyBotCap(150, 0, 5) == UINT32_MAX);   // MobsPerBot 0: no cap
+}

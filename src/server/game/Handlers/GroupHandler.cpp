@@ -360,6 +360,7 @@ void WorldSession::HandleSetRoleOpcode(WorldPackets::Party::SetRole& packet)
         group->BroadcastPacket(roleChangedInform.Write(), false);
         group->SetLfgRoles(packet.TargetGUID, packet.Role);
         GroupFinderListings::OnGroupChanged(group);     // the group's Group Finder post in Discord shows the new role
+        sScriptMgr->OnGroupMemberRoleSet(group, GetPlayer()->GetGUID(), packet.TargetGUID, oldRole, packet.Role);
     }
     else
         SendPacket(roleChangedInform.Write());
@@ -494,7 +495,10 @@ void WorldSession::HandleConvertRaidOpcode(WorldPackets::Party::ConvertRaid& pac
 
     // New 4.x: it is now possible to convert a raid to a group if member count is 5 or less
     if (packet.Raid)
+    {
         group->ConvertToRaid();
+        group->SetRaidChosenByLeader(true);
+    }
     else
         group->ConvertToGroup();
 }

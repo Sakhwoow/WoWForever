@@ -1,3 +1,4 @@
+#include "Session/AddonControl.h"
 // Playerbot V2 - script registration
 // The module hangs off ScriptMgr: every core event it reacts to arrives through a WorldScript / PlayerScript /
 // UnitScript / GroupScript / GuildScript hook and is forwarded to the matching Module handler. AddSC_playerbot_v2 is
@@ -16,19 +17,26 @@
 #include "ObjectAccessor.h"
 #include "GameTime.h"
 #include "Log.h"
+#include "Map.h"
 #include "PathGenerator.h"
 #include "Random.h"
 #include "Player.h"
 #include "PlayerbotMovement.h"
+#include "Api/BotSwim.h"
 #include "ScriptMgr.h"
+#include "Services.h"
+#include "Util/ConfigReader.h"   // Services::Config().refresh() on `.reload config`
 #include "SharedDefines.h"
 #include "Spell.h"
 #include "SpellAuras.h"
 #include "SpellInfo.h"
+#include "Bot/BotSnapshotBuilder.h"
 #include "Bot/Raid/RaidIncoming.h"
 #include "Bot/Raid/RaidManaLedger.h"
 #include "WorldSession.h"
 #include <algorithm>
+#include <atomic>
+#include <vector>
 
 void AddSC_playerbot_v2_commandscript();
 void AddSC_playerbot_v2_selftest_commandscript();
@@ -66,6 +74,96 @@ bool BotPathTouchesAvoidedLiquid(WorldObject const* source, Movement::PointsArra
         return ClassifyDestinationLiquid(player, x, y, z) != LiquidVerdict::Dry;
     });
 }
+
+// The leg from a to b runs through the ground at one of its yards (Swim::UnderGround). Terrain and models only: the door and object
+// floors move with the map threads, and this can run on a bot logic thread.
+bool SwimLegUnderGround(Map* map, PhaseShift const& phase, G3D::Vector3 const& a, G3D::Vector3 const& b)
+{
+    using namespace Playerbot::BotMovement;
+    uint32 const steps = std::max<uint32>(1, uint32(std::ceil((b - a).magnitude())));
+    for (uint32 i = 1; i < steps; ++i)
+    {
+        G3D::Vector3 const q = a + (b - a) * (float(i) / float(steps));
+        float ground = INVALID_HEIGHT;
+        try
+        {
+            ground = map->GetStaticHeight(phase, q.x, q.y, q.z + 2.0f, /*vmap*/ true, 6.0f);
+        }
+        catch (...)
+        {
+            return true;   // BIH churn race (see SwimLevel): unknown ground, so the leg keeps the height the navmesh gave it
+        }
+        if (ground > INVALID_HEIGHT && Swim::UnderGround(q.z, ground))
+            return true;
+    }
+    return false;
+}
+
+// PathGenerator::WaterRouteAdjust: a bot's route over deep water runs at its swim z (Api/BotSwim.h), not on the surface where the
+// navmesh's water polygons lie. Before it a moving or following bot ran on top of the lake and sank in only when it stood still
+// (UpdateSwimState's settle), and a follower that kept moving never did (Everlake found and fixed the same in their fork, 2026-11-19).
+// A lowered point whose leg to a neighbour would cut into a bank goes back to the height the navmesh gave it. Not for a bot whose
+// movement over water is its own (flying, a taxi, a ship, a vehicle, water walking, a hover) or a ghost, who walks the lake bed.
+void BotSwimRouteDepth(WorldObject const* source, Movement::PointsArray& path)
+{
+    using namespace Playerbot::BotMovement;
+    Player* player = const_cast<Player*>(source->ToPlayer());
+    if (!player || !player->GetSession() || !player->GetSession()->IsBot() || !player->IsInWorld())
+        return;
+    if (!player->IsAlive() || player->IsFlying() || player->IsInFlight() || player->GetTransport() || player->GetVehicle() ||
+        player->HasAuraType(SPELL_AURA_WATER_WALK) || player->HasAuraType(SPELL_AURA_HOVER))
+        return;
+    Map* map = player->GetMap();
+    if (!map)
+        return;
+
+    Movement::PointsArray const original = path;
+    std::vector<bool> lowered(path.size(), false);
+    uint32 count = 0;
+    for (std::size_t i = 1; i < path.size(); ++i)
+    {
+        float swim_z = 0.0f;
+        if (SwimLevel(player, path[i].x, path[i].y, path[i].z, swim_z) && Swim::RoutePointNeedsLowering(path[i].z, swim_z))
+        {
+            path[i].z = swim_z;
+            lowered[i] = true;
+            ++count;
+        }
+    }
+    if (!count)
+        return;
+
+    // A restored point only rises, which lifts its legs away from the ground: one pass over the lowered route settles every leg.
+    std::vector<bool> restore(path.size(), false);
+    PhaseShift const& phase = player->GetPhaseShift();
+    for (std::size_t i = 1; i < path.size(); ++i)
+        if ((lowered[i - 1] || lowered[i]) && SwimLegUnderGround(map, phase, path[i - 1], path[i]))
+            restore[i - 1] = restore[i] = true;
+    uint32 restored = 0;
+    for (std::size_t i = 1; i < path.size(); ++i)
+        if (restore[i] && lowered[i])
+        {
+            path[i].z = original[i].z;
+            ++restored;
+        }
+
+    static std::atomic<uint32> s_logged{ 0 };
+    if (s_logged.fetch_add(1, std::memory_order_relaxed) < 200)
+        TC_LOG_DEBUG("playerbot.v2", "[swim_route] {} route of {} points: {} at swim depth, {} kept at the navmesh height by a bank",
+                     player->GetName(), path.size(), count - restored, restored);
+}
+
+// A bot's walks keep clear of closed doors (SFK 2026-11-17: bots pulled the courtyard and the cells through the closed gates), and so
+// do its plans. Its plans are made on a bot logic thread while the map threads move doors, so they test the doors the map published
+// (Map::PublishClosedDoors); the move itself, on the map thread, tests the live ones. Before the plans saw doors at all, hot_full af53
+// (20 Nov) planned the tank through the Hall of Thanes' shut Iron Door and stood at it for 120 s.
+PathGenerator::ClosedDoorTest BotPathAvoidsClosedDoors(WorldObject const* source)
+{
+    Player const* player = source->ToPlayer();
+    if (!player || !player->GetSession() || !player->GetSession()->IsBot())
+        return PathGenerator::ClosedDoorTest::None;
+    return Playerbot::BotMovement::InBotLogicThread() ? PathGenerator::ClosedDoorTest::Published : PathGenerator::ClosedDoorTest::Live;
+}
 }
 
 class playerbot_v2_world : public WorldScript
@@ -90,6 +188,15 @@ public:
     void OnShutdown() override
     {
         Module::instance().Shutdown();
+    }
+
+    // `.reload config` has just read every config file again (playerbot.conf included): the module takes the new values too,
+    // so one reload is enough for a bot setting in worldserver.conf.d.
+    void OnConfigLoad(bool reload) override
+    {
+        if (!reload || !Playerbot::Services::Initialized())
+            return;
+        Playerbot::Services::Config().refresh();
     }
 
     // A real player is about to take a place in a running battleground (a bot is leaving for them): no second instance
@@ -231,6 +338,21 @@ public:
 
     void OnChatSent(Player* player, uint32 /*type*/, uint32 /*lang*/, std::string const& msg, Player* receiver) override
     {
+        if (player == receiver && msg.starts_with("FBTrade ") && msg.size() < 140)
+        {
+            auto split = msg.find(' ', 8);
+            if (split == std::string::npos)
+                return;
+            std::string seq = msg.substr(8, split - 8);
+            if (seq.empty() || seq.size() > 8 || seq.find_first_not_of("0123456789abcdef") != std::string::npos)
+                return;
+            std::string token = msg.substr(split + 1);
+            if (token != "view" && (token.empty() || token.find_first_not_of("0123456789:") != std::string::npos))
+                return;
+            Playerbot::V2::AddonControl::OnAddonWhisper(player, receiver, "PBC", "1|" + seq +
+                (token == "view" ? "|1|1|BOT_TRADE_VIEW|" : "|1|1|BOT_TRADE_ACCEPT|" + token));
+            return;
+        }
         Module::instance().OnWhisperReceived(player, receiver, msg);
     }
 
@@ -341,14 +463,25 @@ public:
     }
 };
 
+// A spell that deals environmental damage (Spell::EffectEnvironmentalDMG) names itself with OnDamageSpell from its caster first, then
+// Player::EnvironmentalDamage deals the hit as the player on itself with no spell. That self hit takes the named spell, so a bot's
+// death line says which spell it was instead of "killer=self spell=melee" (Captain Dreadrise, Drowned City, af47 and af50 2026-11-19).
+// World or map thread only, one damage event at a time; OnDamage clears it.
+namespace { thread_local Unit const* tl_env_victim = nullptr; thread_local uint32 tl_env_spell = 0; }
+
 class playerbot_v2_unit : public UnitScript
 {
 public:
     playerbot_v2_unit() : UnitScript("playerbot_v2_unit") { }
 
-    void OnDamageSpell(Unit* /*attacker*/, Unit* /*victim*/, uint32 /*damage*/, SpellInfo const* spellInfo) override
+    void OnDamageSpell(Unit* attacker, Unit* victim, uint32 /*damage*/, SpellInfo const* spellInfo) override
     {
-        Module::instance().NoteDamageSpell(spellInfo ? spellInfo->Id : 0);
+        uint32 spellId = spellInfo ? spellInfo->Id : 0;
+        if (!spellId && attacker && attacker == victim && victim == tl_env_victim)
+            spellId = tl_env_spell;
+        tl_env_victim = spellInfo && attacker != victim ? victim : nullptr;
+        tl_env_spell = tl_env_victim ? spellInfo->Id : 0;
+        Module::instance().NoteDamageSpell(spellId);
     }
 
     void OnHitOutcome(Unit* attacker, Unit* victim, uint32 spellId, uint8 outcome, uint32 damage) override
@@ -358,6 +491,8 @@ public:
 
     void OnDamage(Unit* attacker, Unit* victim, uint32& damage) override
     {
+        tl_env_victim = nullptr;
+        tl_env_spell = 0;
         Module::instance().OnDamageTaken(attacker, victim, int32(damage), 0);
         // Raid incoming-damage table: a creature hit a player the raid brain watches in a pull.
         if (attacker && victim && victim->GetTypeId() == TYPEID_PLAYER && attacker->GetTypeId() == TYPEID_UNIT)
@@ -395,6 +530,11 @@ public:
     void OnSubgroupChange(Group* group, ObjectGuid guid, uint8 subgroup) override
     {
         Module::instance().OnRaidSubgroupChanged(group, guid, subgroup);
+    }
+
+    void OnMemberRoleSet(Group* group, ObjectGuid setter, ObjectGuid target, uint8 /*oldRole*/, uint8 newRole) override
+    {
+        Module::instance().OnMemberRoleSet(group, setter, target, newRole);
     }
 
     // A bot that joins a group has the riding and mount its level allows (a world bot a player invited rides with him).
@@ -444,4 +584,7 @@ void AddSC_playerbot_v2()
     AddSC_playerbot_v2_selftest_commandscript();
 
     PathGenerator::SetLiquidRouteCheck(&BotPathTouchesAvoidedLiquid);
+    PathGenerator::SetClosedDoorCheck(&BotPathAvoidsClosedDoors);
+    PathGenerator::SetWaterRouteAdjust(&BotSwimRouteDepth);
+    Map::SetClosedDoorPlanThroughCheck(&Playerbot::DoorOpenedByHand);
 }

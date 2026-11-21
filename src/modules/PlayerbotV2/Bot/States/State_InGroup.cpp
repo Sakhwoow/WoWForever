@@ -101,14 +101,14 @@ static void AnswerReadyCheck(BotAI& ai, BotSnapshotView const& snapshot, GroupSn
             if (why)
             {
                 if (snapshot.is_alive())
-                    emit.say(why);
+                    BotChatter::SayToGroup(emit, snapshot, why);
             }
             else if (ready)
             {
                 // Now and then a plain "ready" in chat, like a person (Playerbot.Behavior.PartyBanter).
                 std::string line = BotChatter::BanterLine(BotChatter::Banter::Ready, ai, snapshot);
                 if (!line.empty())
-                    emit.say(std::move(line));
+                    BotChatter::SayToGroup(emit, snapshot, std::move(line));
             }
             ai.set_ready_check_acked(true);
             ai.set_last_rule_fired("ingroup:ready_check_ack");
@@ -608,6 +608,15 @@ void DispatchInGroup(BotAI& ai,
         DungeonHonorCross(snapshot, ai, emit, snapshot.published_at_ms()))
         return;
 
+    // A raid pre-pull spot (Thaddius' platforms, Gothik's sides, Patchwerk's posts) is the raid brain's: idle:raid_prepull walks the
+    // bot there and holds it until the pull, and the brain drops the order once the boss fights. The cohesion moves below (rejoin the
+    // tank past 40 y, converge, formation, follow) would walk it off its spot each tick and the hold back again. naxx_thaddius r25:
+    // once the attack was ordered the whole Feugen side walked to 40 y of the main tank on Stalagg's platform, stood on the ramp
+    // between them (ingroup:dungeon_rejoin_tank / idle:raid_prepull in turn), and the run timed out unpulled.
+    if (auto const& ro = snapshot.raw().raid_order; ro.active && ro.prepull && (ro.move || ro.cast_spell) && snapshot.is_alive() &&
+        !snapshot.in_combat())
+        return;
+
     // Anchor selection:
     //   * Healer (always): stick to the tank. Being out of range to heal
     //     is the most common cause of group wipes from bot positioning.
@@ -767,7 +776,9 @@ void DispatchInGroup(BotAI& ai,
     // (the defend-member step below). Stance Passive, or Auto in an instance a human leads (BotAI::passive_now); an attack / pull
     // order opens a 15 s window in which it fights.
     // Led by a player (his companion, or a world bot he invited) and no stance picked: Passive, in the open world too.
-    const bool auto_passive = (snapshot.is_in_instance() && !group.leader_is_bot()) || snapshot.is_led_by_player();
+    // Not while the tank leads the dungeon ("lead on"): the bots fight the tank's pulls as in a group of bots alone.
+    const bool auto_passive = !ai.tank_leads_here(snapshot) &&
+                              ((snapshot.is_in_instance() && !group.leader_is_bot()) || snapshot.is_led_by_player());
     const bool owner_passive_stance = ai.passive_now(auto_passive);
     // The player is fighting: his bots fight with him (the owner, 2026-10-27: "bots should always fight if you're fighting"). Passive
     // only keeps a bot from STARTING a fight; once the human leader is in combat, the leader's target and every mob on a group member
@@ -792,7 +803,7 @@ void DispatchInGroup(BotAI& ai,
     // seconds the window never closed and the whole assist chain ran, the tank opening on mobs 32-43 y away).
     // Once the group fights, the window limits nothing: the owner pressing Attack through a pull kept his rogue and cat druid on his own
     // target only, and a warlock's is a spell's, not a melee victim; they stood beside him (UBRS 2026-10-28 22:10, Attack every 4-8 s).
-    const bool passive_kind = ai.owner_passive() ||
+    const bool passive_kind = (ai.owner_passive() && !ai.defensive_tank_lead()) ||
                               (ai.owner_stance() == BotAI::OwnerStance::Auto && auto_passive);
     const bool window_limited = !owner_passive_stance && passive_kind && !group_fight_on;
     // A Passive bot the group's fight released joins only that fight (GroupControl::LeaderFightMayJoin): his target, a mob near him,
@@ -985,9 +996,19 @@ void DispatchInGroup(BotAI& ai,
             else if (leader_fighting && leader_member->map_id == snapshot.map_id() && leader_member->is_casting &&
                      resolves_hostile(leader_member->casting_target))
                 assist_target = leader_member->casting_target;
+            // A member's target the group holds with crowd control (the mage's own sheep) is not one to join (the defend-member
+            // engage below has the smcathedral_full af57 case).
+            auto group_cc_held = [&](ObjectGuid v) -> bool
+            {
+                if (snapshot.raw().pve_order.cc_reserved_mob(v)) return true;
+                for (auto const& u : snapshot.raw().combat.nearby_enemies)
+                    if (u.guid == v) return u.is_cc_locked;
+                return false;
+            };
             if (assist_target.IsEmpty() && !window_limited)
                 for (auto const& m : *members)
-                    if (m.online && m.map_id == snapshot.map_id() && m.in_combat && resolves_hostile(m.victim) && fight_join_ok(m.victim))
+                    if (m.online && m.map_id == snapshot.map_id() && m.in_combat && resolves_hostile(m.victim) && !group_cc_held(m.victim) &&
+                        fight_join_ok(m.victim))
                     { assist_target = m.victim; break; }
         }
         // Defend-member engage (ALL roles, tanks very much included): a mob
@@ -1016,6 +1037,11 @@ void DispatchInGroup(BotAI& ai,
                         if (m.guid == u.victim) { attacks_member = true; victim_member = &m; break; }
                 if (!attacks_member) continue;
                 if (!fight_join_ok(u.guid)) continue;
+                // A mob the group holds or is about to hold with crowd control is not a pull in progress: it reads as on the member
+                // who cast the CC, and every bot that "defended" that member broke the CC at once (smcathedral_full af57: the mage's
+                // Polymorph on a Scarlet Monk of a 9-mob hall pack, the whole group and the mage itself opened on it in the same
+                // second, the pack came in and the tank died). The CC caster renews it; the tank picks it up if it gets loose.
+                if (u.is_cc_locked || dpo.cc_reserved_mob(u.guid)) continue;
                 // Leash (open world and instance trash, never a boss): a Passive bot defends a mob on someone else only while it is within PassiveLeashYd of the leader
                 // or of the member it is on (a healer 30 y back is still defended), and that member is itself near the leader. It
                 // never runs off to a pack the group has not pulled. A mob on the bot itself is always fought.

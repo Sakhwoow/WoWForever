@@ -39,8 +39,11 @@
 #include "Bot/BotSnapshotView.h"
 #include "Bot/BotIntentEmitter.h"
 #include "Bot/ClassicUpkeep.h"
+#include "Bot/ResistGear.h"
 #include "Services.h"
 #include "SharedDefines.h"
+#include "SpellInfo.h"
+#include "SpellMgr.h"
 #include "Util/ConfigReader.h"
 #include <vector>
 
@@ -143,6 +146,10 @@ struct SkipCtx
 bool SkipRecent(void const* ctx, uint64 key)
 {
     SkipCtx const& c = *static_cast<SkipCtx const*>(ctx);
+    // The core refused the last cast of this pick for a passing reason (the global cooldown of the cast before it): cast it again now,
+    // neither the 30 s lockout nor the ledger holds it back (ClassicBuffLedger.h CastRefusedAfter).
+    if (c.ai->buff_cast_refusal(key) == BotAI::BuffCastRefusal::Passing)
+        return false;
     return c.ai->action_recently_tried(BotAI::ActionKind::ClassUpkeep, key, c.now_ms) || c.ai->buff_cast_trusted(key, c.now_ms);
 }
 
@@ -183,7 +190,7 @@ bool BlessingsFire(BotSnapshotView const& s, BotAI& ai, GroupSnapshotView const&
     if (b.key)
     {
         ai.note_action_retry(BotAI::ActionKind::ClassUpkeep, b.key, now_ms);
-        ai.note_buff_cast(b.key, now_ms);
+        ai.note_buff_cast(b.key, now_ms, b.spell, b.target);
     }
     // [raid_support] why this blessing goes out (MC 2026-10-08: 45-105 blessings a minute): the target's tracked buffs as the
     // group snapshot sees them, once per paladin and key per minute.
@@ -204,8 +211,21 @@ bool BlessingsFire(BotSnapshotView const& s, BotAI& ai, GroupSnapshotView const&
                     if (m.guid == b.target)
                         for (AuraEntry const& a : m.buffs)
                             seen += fmt::format("{}{}:{}s", seen.empty() ? "" : " ", a.spell_id, a.remaining.count() / 1000);
-            TC_LOG_INFO("playerbot.v2", "[raid_support] {} casts spell {} on {} (key {:x}): target's tracked buffs [{}]", s.name(), b.spell,
-                        b.target.GetCounter(), b.key, seen);
+            // A raid's paladin that blesses member by member takes a minute over forty (naxx22 1116: two paladins still owed blessings
+            // 50-84 s past the attack order on three bosses). What keeps it off the Greater Blessings: its Symbols of Kings, whether it
+            // knows Greater Might / Wisdom / Kings, and whether this server's Greater Might applies anything (GreaterBlessingWorks).
+            std::string greater;
+            if (g.is_raid() && (b.key >> 48) == 2)
+            {
+                bool might_works = false;
+                if (SpellInfo const* si = sSpellMgr->GetSpellInfo(25782, DIFFICULTY_NONE))
+                    for (SpellEffectInfo const& eff : si->GetEffects())
+                        might_works = might_works || eff.Effect != SPELL_EFFECT_NONE;
+                greater = fmt::format("; one by one: Symbol of Kings {}, knows Greater Might {} Wisdom {} Kings {}, Greater Might applies {}",
+                                      s.item_count(21177), s.knows_spell(25782), s.knows_spell(25894), s.knows_spell(25898), might_works);
+            }
+            TC_LOG_INFO("playerbot.v2", "[raid_support] {} casts spell {} on {} (key {:x}): target's tracked buffs [{}]{}", s.name(), b.spell,
+                        b.target.GetCounter(), b.key, seen, greater);
         }
     }
     Classic::NoteRaidSupport(Classic::RaidSupportKind::Blessing);
@@ -231,7 +251,7 @@ bool RaidBuffsFire(BotSnapshotView const& s, BotAI& ai, GroupSnapshotView const&
     if (b.key)
     {
         ai.note_action_retry(BotAI::ActionKind::ClassUpkeep, b.key, now_ms);
-        ai.note_buff_cast(b.key, now_ms);
+        ai.note_buff_cast(b.key, now_ms, b.spell, b.target);
         Classic::NoteAreaBuffCast(s.guid(), b.key, b.area_needy, now_ms);
     }
     // [raid_support] why this class buff goes out (MC Garr 2026-10-10: the druids cast Mark of the Wild over and over): the target's
@@ -632,7 +652,46 @@ bool FightCloakGate(BotSnapshotView const& s, BotAI& ai, GroupSnapshotView const
     if (!UpkeepWindow(s, g) || s.recently_in_combat(3000))
         return false;
     bool const want = Classic::WantsFightCloak(s);
-    return want != ai.fight_cloak() && !ai.action_recently_tried(BotAI::ActionKind::ClassUpkeep, uint64(want) | kFightCloakKeyBit, now_ms);
+    // Wanted but not worn: the swap was refused (combat, bags) or something took the cloak off since. The flag alone said "done" and the
+    // bot pulled in its own cloak (dev realm 2026-11-13); the back slot is what counts.
+    bool const worn = s.raw().inventory.equipped[14 /*EQUIPMENT_SLOT_BACK*/].entry == Classic::kOnyxiaScaleCloak;
+    if (want && worn && !s.has_aura(Classic::kOnyxiaScaleCloakAura))
+    {
+        // Worn but its equip aura is gone, so Shadow Flame burns the bot anyway (dev realm 2026-11-13: eight cloaked bots died of the
+        // burn). Logged once a minute per bot until the cause is known; the line's time places the loss among the fight's events.
+        static std::mutex sMissingMutex;
+        static std::unordered_map<uint64, uint32> sMissingLogged;
+        bool log_now = false;
+        {
+            std::lock_guard<std::mutex> lock(sMissingMutex);
+            if (sMissingLogged.size() > 4096)
+                sMissingLogged.clear();
+            uint32& at = sMissingLogged[s.guid().GetCounter()];
+            if (!at || now_ms - at > 60000)
+            {
+                at = now_ms;
+                log_now = true;
+            }
+        }
+        if (log_now)
+            TC_LOG_INFO("playerbot.v2", "[fight_cloak] {} wears the Onyxia Scale Cloak but aura {} is MISSING (alive {}, in combat {})",
+                s.name(), Classic::kOnyxiaScaleCloakAura, s.is_alive(), s.in_combat());
+    }
+    // Worn and wanted, but the flag is not set: a relog (a fresh BotAI) with the copy still on. Without the flag the equip rules see the
+    // own cloak in the bags as an upgrade and take the copy off (BotAI::gear_slot_held).
+    if (want && worn && !ai.fight_cloak())
+        ai.set_fight_cloak(true);
+    // The raid is still in there: a bot that died, released and came back alive at the graveyard outside (or is a ghost on its way back)
+    // keeps the copy on. It runs back into a fight in progress, where nobody can change armour, so the swap back would never happen.
+    // Karrz's Nefarian kill 2026-11-14 15:10-15:20: 11 bots put their own cloak back at 15:16:22-15:17:45 after the phase 3 death wave, ran
+    // back in and died 13 times to the Shadow Flame burn 22682; every one of them wore the copy again only after the kill (15:20:46).
+    if (!want && worn && ai.fight_cloak() && s.in_group() && s.is_in_raid())
+        if (auto const* members = g.members())
+            for (auto const& m : *members)
+                if (m.is_alive && !m.is_ghost && Classic::FightCloakMap(m.map_id))
+                    return false;
+    bool const differs = want ? !worn : ai.fight_cloak();
+    return differs && !ai.action_recently_tried(BotAI::ActionKind::ClassUpkeep, uint64(want) | kFightCloakKeyBit, now_ms);
 }
 bool FightCloakFire(BotSnapshotView const& s, BotAI& ai, GroupSnapshotView const&, BotIntentEmitter& emit, uint32 now_ms)
 {
@@ -646,6 +705,24 @@ bool FightCloakFire(BotSnapshotView const& s, BotAI& ai, GroupSnapshotView const
 }
 
 } // namespace
+
+// A buff round paused on the global cooldown: the bot owes a blessing or class buff it casts at this mana, and only the GCD of the cast
+// before it holds the next one back (BotIntentEmitter::cast's GCD and per-spell lockouts, 1.5 s). The rest rules do not sit the bot down
+// in that gap: the next cast stands it straight up and the drink or meal is lost (Naxx Razuvious r2 af54: a paladin blessing the raid one
+// member at a time sat down to drink at 93-94% mana between blessings and stood up for the next, again and again for two minutes).
+bool ClassicUpkeepCastPending(BotSnapshotView const& s, BotAI& ai, GroupSnapshotView const& g, uint32 now_ms)
+{
+    if (!UpkeepWindow(s, g) || !BuffManaOk(s))
+        return false;
+    auto const held = [&ai, now_ms](uint32 spell)
+    {
+        return spell != 0 && (ai.gcd_recently_started(now_ms) || ai.cast_recently_emitted(spell, now_ms));
+    };
+    SkipCtx const ctx{ &ai, now_ms };
+    if (held(Classic::PickBlessing(s, g, false, { &SkipRecent, &ctx }).spell))
+        return true;
+    return held(Classic::PickClassBuff(s, g, { &SkipRecent, &ctx }).spell);
+}
 
 void RegisterClassicUpkeepRules(IdleRuleRegistry& r)
 {

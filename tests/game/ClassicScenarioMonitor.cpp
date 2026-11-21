@@ -24,6 +24,7 @@
 #include <cmath>
 #include <set>
 #include <string>
+#include <string_view>
 
 using namespace Playerbot::Diagnostics;
 
@@ -821,20 +822,44 @@ TEST_CASE("ScenarioDefs: the other raids are one boss each, 40 raiders (BWL, AQ4
                 CHECK((m.race == ScnRace::Human || m.race == ScnRace::Dwarf || m.race == ScnRace::NightElf || m.race == ScnRace::Gnome));
             }
             CHECK(names.size() == f.raiders);
-            CHECK(tanks == (f.raiders == 40 ? 4u : 2u));
-            CHECK(healers == (f.raiders == 40 ? 12u : 6u));
+            // The Four Horsemen bring eight tanks (kHorsemenRaid: a tank hands his horseman to one without that mark); every other raid four or two.
+            CHECK(tanks == (std::string_view(r.name) == "naxx_horsemen" ? 8u : f.raiders == 40 ? 4u : 2u));
+            // Loatheb brings fifteen healers (kLoathebRaid: Corrupted Mind leaves each one heal a minute); every other raid twelve or six.
+            CHECK(healers == (std::string_view(r.name) == "naxx_loatheb" ? 15u : f.raiders == 40 ? 12u : 6u));
         }
     // The three fights that keep two or three kinds of add: the bug trio (Yauj, Kri), Thekal (Zath, Lor'Khan), the Horsemen (the other three).
     CHECK(FindScenario("aq40_bugtrio")->keep_entry_c == 0);
     CHECK(FindScenario("zg_thekal")->keep_entry_b == 11347);
     CHECK(FindScenario("zg_mandokir")->start_add == 11391);   // the order is onto the Vilebranch Speaker; Mandokir is immune until he dies
     CHECK(FindScenario("zg_jindo")->start_add == 0);
+    // Ouro has no spawn row: his Spawner summons him (Summon Ouro) when the attack is due; every other boss stands in his room.
+    CHECK(FindScenario("aq40_ouro")->summoner_entry == 15957);
+    CHECK(FindScenario("aq40_ouro")->summoner_spell == 26061);
+    CHECK(FindScenario("aq40_ouro")->lair_z == 0.f);
+    CHECK(FindScenario("aq40_cthun")->summoner_entry == 0);
     // Hakkar is fought after the five High Priests: their DONE states, then his Power stacks recounted (type 0).
     REQUIRE(FindScenario("zg_hakkar")->start_instance_data.size() == 6);
     CHECK(FindScenario("zg_hakkar")->start_instance_data.back() == std::pair<std::uint32_t, std::uint32_t>{ 0u, 0u });
     CHECK(FindScenario("zg_jindo")->start_instance_data.empty());
     CHECK(FindScenario("naxx_horsemen")->keep_entry_c == 16065);
-    CHECK(found.size() == 5 + 13 + 5 + 8 + 14);
+    // Kel'Thuzad has a scenario of its own (MakeNaxxKelThuzadScenario): the runner starts his phase 1 as his room's area trigger does.
+    {
+        ScenarioDef const* kt = FindScenario("naxx_kelthuzad");
+        REQUIRE(kt != nullptr);
+        CHECK(found.insert(kt->name).second);
+        CHECK(kt->map == 533);
+        CHECK(kt->level == 60);
+        CHECK(kt->squad.size() == 40);
+        CHECK(kt->goal_entry == 15990u);
+        CHECK(kt->start_npc == 15990u);
+        CHECK(kt->start_npc_action == 1);
+    }
+    // Every boss row of the five families, and Kel'Thuzad's scenario on top.
+    std::size_t rows = 0;
+    for (Family const& f : families)
+        rows += f.n;
+    CHECK(found.size() == rows + 1);
+    CHECK(rows == 5 + 13 + 5 + 9 + 14);
     // Arlokk has no creature row (the gong summons her): the runner summons her at the gong's spot.
     CHECK(FindScenario("zg_arlokk")->lair_z != 0.f);
     // Nor do the four Edge of Madness bosses (the Brazier of Madness brings one a lockout): each is summoned in front of the brazier.

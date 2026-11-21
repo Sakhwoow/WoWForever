@@ -21,6 +21,7 @@
 #include "BattlegroundScript.h"
 #include "CellImpl.h"
 #include "CharacterPackets.h"
+#include "ClosedDoorShape.h"
 #include "ChatPackets.h"
 #include "Conversation.h"
 #include "DB2Stores.h"
@@ -61,6 +62,7 @@
 #include "VignettePackets.h"
 #include "Weather.h"
 #include "WeatherMgr.h"
+#include "WorldModel.h"
 #include "World.h"
 #include "WorldSession.h"
 #include "WorldStateMgr.h"
@@ -663,6 +665,7 @@ void Map::UpdatePlayerZoneStats(uint32 oldZone, uint32 newZone)
 void Map::Update(uint32 t_diff)
 {
     _dynamicTree.update(t_diff);
+    PublishClosedDoors(t_diff);
     if (m_mmapTileRebuilder)
         m_mmapTileRebuilder->Update(Milliseconds(t_diff));
 
@@ -1790,6 +1793,152 @@ bool Map::isInLineOfSight(PhaseShift const& phaseShift, float x1, float y1, floa
     return true;
 }
 
+bool Map::FindClosedDoorOnSegment(PhaseShift const& phaseShift, G3D::Vector3 const& from, G3D::Vector3 const& to, G3D::Vector3& hit) const
+{
+    G3D::Vector3 const delta = to - from;
+    float const length = delta.magnitude();
+    if (length < 0.01f)
+        return false;
+    G3D::Ray const ray = G3D::Ray::fromOriginAndDirection(from, delta / length);
+
+    // every grid the leg's box covers: a long leg (a straight shortcut) can cross a corner grid neither end lies in
+    GridCoord const a = Trinity::ComputeGridCoord(from.x, from.y);
+    GridCoord const b = Trinity::ComputeGridCoord(to.x, to.y);
+    float best = length;
+    bool found = false;
+    for (uint32 gx = std::min(a.x_coord, b.x_coord); gx <= std::max(a.x_coord, b.x_coord); ++gx)
+    {
+        for (uint32 gy = std::min(a.y_coord, b.y_coord); gy <= std::max(a.y_coord, b.y_coord); ++gy)
+        {
+            for (GameObjectModel const* model : GetGameObjectModelsInGrid((MAX_NUMBER_OF_GRIDS - 1) - gx, (MAX_NUMBER_OF_GRIDS - 1) - gy))
+            {
+                if (!model->IsDoor() || !model->IsCollisionEnabled())
+                    continue;
+                float dist = best;
+                if (model->IntersectRay(ray, dist, true, phaseShift, VMAP::ModelIgnoreFlags::Nothing) && dist <= best)
+                {
+                    best = dist;
+                    found = true;
+                }
+            }
+        }
+    }
+    if (found)
+        hit = from + ray.direction() * best;
+    return found;
+}
+
+Map::ClosedDoorPlanThroughCheck Map::_closedDoorPlanThroughCheck = nullptr;
+
+void Map::AddDoor(GameObject* door)
+{
+    _doors.insert(door);
+    _closedDoorsChanged = true;
+}
+
+void Map::RemoveDoor(GameObject* door)
+{
+    if (_doors.erase(door))
+        _closedDoorsChanged = true;
+}
+
+std::shared_ptr<std::vector<ClosedDoorShape> const> Map::GetPublishedClosedDoors() const
+{
+    std::scoped_lock lock(_publishedClosedDoorsLock);
+    return _publishedClosedDoors;
+}
+
+// The closed doors a path searched off the map thread keeps clear of. A bot plans its moves beside the map update, where the door
+// models (FindClosedDoorOnSegment) are not safe to read, so before this its plans ran through every closed door and only the move
+// itself, on the map thread, stopped at it: hot_full af53 (20 Nov) planned the tank's steps through the Hall of Thanes' shut Iron
+// Door to Faldrim, each step was refused at the door, and the group stood there 120 s instead of taking the way round the north.
+// Published again as soon as a door opens, closes, comes or goes; a door's spawn state and phase change without telling the map,
+// so also every second.
+void Map::PublishClosedDoors(uint32 diff)
+{
+    static constexpr uint32 CLOSED_DOOR_REFRESH_MS = 1000;
+    if (!_closedDoorsChanged && _closedDoorsRefreshTimer > diff)
+    {
+        _closedDoorsRefreshTimer -= diff;
+        return;
+    }
+    _closedDoorsRefreshTimer = CLOSED_DOOR_REFRESH_MS;
+    _closedDoorsChanged = false;
+    if (_doors.empty() && !_publishedClosedDoors)   // only this thread writes it
+        return;
+
+    std::shared_ptr<std::vector<ClosedDoorShape>> doors = std::make_shared<std::vector<ClosedDoorShape>>();
+    for (GameObject const* door : _doors)
+    {
+        GameObjectModel const* model = door->m_model.get();
+        if (!model || !model->IsCollisionEnabled() || !door->isSpawned() || model->GetScale() <= 0.0f)
+            continue;
+        std::shared_ptr<VMAP::WorldModel const> worldModel = model->GetWorldModel();
+        if (!worldModel)
+            continue;
+        ClosedDoorShape& shape = doors->emplace_back();
+        shape.Model = std::move(worldModel);
+        shape.Bound = model->getBounds();
+        shape.InvRot = model->GetInvRot();
+        shape.Pos = model->GetPosition();
+        shape.Scale = model->GetScale();
+        shape.InvScale = 1.0f / shape.Scale;
+        shape.Phase = door->GetPhaseShift();
+        shape.Entry = door->GetEntry();
+        shape.PlanThrough = _closedDoorPlanThroughCheck && _closedDoorPlanThroughCheck(door);
+    }
+
+    std::shared_ptr<std::vector<ClosedDoorShape> const> published;
+    if (!doors->empty())
+        published = std::move(doors);
+    std::scoped_lock lock(_publishedClosedDoorsLock);
+    _publishedClosedDoors = std::move(published);
+}
+
+bool ClosedDoorShape::IntersectRay(G3D::Ray const& ray, float& maxDist, PhaseShift const& phaseShift) const
+{
+    if (!Phase.CanSee(phaseShift))
+        return false;
+    if (ray.intersectionTime(Bound) == G3D::finf())
+        return false;
+
+    // the model's bounds are in object space
+    G3D::Vector3 const origin = InvRot * (ray.origin() - Pos) * InvScale;
+    G3D::Ray const modelRay(origin, InvRot * ray.direction());
+    float distance = maxDist * InvScale;
+    if (!Model->IntersectRay(modelRay, distance, true, VMAP::ModelIgnoreFlags::Nothing))
+        return false;
+    maxDist = distance * Scale;
+    return true;
+}
+
+bool FindClosedDoorOnSegment(std::vector<ClosedDoorShape> const& doors, PhaseShift const& phaseShift, G3D::Vector3 const& from,
+    G3D::Vector3 const& to, G3D::Vector3& hit)
+{
+    G3D::Vector3 const delta = to - from;
+    float const length = delta.magnitude();
+    if (length < 0.01f)
+        return false;
+    G3D::Ray const ray = G3D::Ray::fromOriginAndDirection(from, delta / length);
+
+    float best = length;
+    bool found = false;
+    for (ClosedDoorShape const& door : doors)
+    {
+        if (door.PlanThrough)
+            continue;
+        float dist = best;
+        if (door.IntersectRay(ray, dist, phaseShift) && dist <= best)
+        {
+            best = dist;
+            found = true;
+        }
+    }
+    if (found)
+        hit = from + ray.direction() * best;
+    return found;
+}
+
 bool Map::getObjectHitPos(PhaseShift const& phaseShift, float x1, float y1, float z1, float x2, float y2, float z2, float& rx, float& ry, float& rz, float modifyDist)
 {
     G3D::Vector3 startPos(x1, y1, z1);
@@ -2046,17 +2195,32 @@ bool Map::CheckRespawn(RespawnInfo* info)
             // escort check for creatures only (if the world config boolean is set)
             bool const isEscort = (sWorld->getBoolConfig(CONFIG_RESPAWN_DYNAMIC_ESCORTNPC) && data->spawnGroupData->flags & SPAWNGROUP_FLAG_ESCORTQUESTNPC);
 
+            // A spawn has one body: it does not come back while its corpse still lies there. The respawn delay and the corpse decay
+            // are equal for most creatures (Corpse.Decay.Normal 300 s), and a shorter, scaled respawn made the creature stand up again
+            // beside its own corpse ("the corpse came back to life", Discord 2026-11-09, Dun Morogh). The respawn waits for the corpse
+            // to decay or be removed; the corpse keeps its loot until then.
+            bool corpseStillThere = false;
             auto range = _creatureBySpawnIdStore.equal_range(info->spawnId);
             for (auto it = range.first; it != range.second; ++it)
             {
                 Creature* creature = it->second;
                 if (!creature->IsAlive())
+                {
+                    // a corpse already on its way out (Map::Respawn removes it for an asked-for respawn) does not hold the spawn back
+                    if (creature->getDeathState() == CORPSE && !creature->IsSummon() && !creature->IsDestroyedObject())
+                        corpseStillThere = true;
                     continue;
+                }
                 // escort NPCs are allowed to respawn as long as all other instances are already escorting
                 if (isEscort && creature->IsEscorted())
                     continue;
                 alreadyExists = true;
                 break;
+            }
+            if (!alreadyExists && corpseStillThere)
+            {
+                info->respawnTime = GameTime::GetGameTime() + 1; // look again next second
+                return false;
             }
             break;
         }
@@ -2098,6 +2262,15 @@ bool Map::CheckRespawn(RespawnInfo* info)
 
 void Map::Respawn(RespawnInfo* info, CharacterDatabaseTransaction dbTrans)
 {
+    // A respawn that is asked for (.respawn, a boss script bringing a boss or its adds back) happens at once: the spawn's corpse
+    // goes now. CheckRespawn holds a spawn back while its corpse still lies there (one body per spawn), which made .respawn on a
+    // dead boss wait until the body decayed (DoctorSun, 2026-11-20) and held back the scripted revives the same way. This runs
+    // before the due check below: a respawn that is already due, and only waiting for the corpse, is let through as well.
+    if (info->type == SPAWN_TYPE_CREATURE)
+        for (auto const& pair : Trinity::Containers::MapEqualRange(GetCreatureBySpawnIdStore(), info->spawnId))
+            if (pair.second->getDeathState() == CORPSE && !pair.second->IsSummon() && !pair.second->IsDestroyedObject())
+                pair.second->RemoveCorpse(false, true);
+
     if (info->respawnTime <= GameTime::GetGameTime())
         return;
     info->respawnTime = GameTime::GetGameTime();
@@ -4126,7 +4299,21 @@ void Map::SendZoneDynamicInfo(uint32 zoneId, Player* player) const
 
     SendZoneWeather(itr->second, player);
 
-    for (ZoneDynamicInfo::LightOverride const& lightOverride : itr->second.LightOverrides)
+    SendZoneLightOverrides(itr->second, player);
+}
+
+void Map::SendZoneLightOverrides(uint32 zoneId, Player* player) const
+{
+    auto itr = _zoneDynamicInfo.find(zoneId);
+    if (itr == _zoneDynamicInfo.end())
+        return;
+
+    SendZoneLightOverrides(itr->second, player);
+}
+
+void Map::SendZoneLightOverrides(ZoneDynamicInfo const& zoneDynamicInfo, Player* player) const
+{
+    for (ZoneDynamicInfo::LightOverride const& lightOverride : zoneDynamicInfo.LightOverrides)
     {
         WorldPackets::Misc::OverrideLight overrideLight;
         overrideLight.AreaLightID = lightOverride.AreaLightId;
@@ -4248,11 +4435,19 @@ void Map::SetZoneOverrideLight(uint32 zoneId, uint32 areaLightId, uint32 overrid
         lightOverride.TransitionMilliseconds = static_cast<uint32>(transitionTime.count());
     }
 
-    WorldPackets::Misc::OverrideLight overrideLight;
-    overrideLight.AreaLightID = areaLightId;
-    overrideLight.OverrideLightID = overrideLightId;
-    overrideLight.TransitionMilliseconds = static_cast<uint32>(transitionTime.count());
-    SendZoneMessage(zoneId, overrideLight.Write());
+    // when the zone's light ends, a player who keeps their own sky (.time day / night) goes back to that sky, not the map's light
+    for (MapReference const& ref : GetPlayers())
+    {
+        Player* player = ref.GetSource();
+        if (!player->IsInWorld() || player->GetZoneId() != zoneId)
+            continue;
+
+        WorldPackets::Misc::OverrideLight overrideLight;
+        overrideLight.AreaLightID = areaLightId;
+        overrideLight.OverrideLightID = overrideLightId ? int32(overrideLightId) : player->GetSkyOverrideLight(areaLightId);
+        overrideLight.TransitionMilliseconds = static_cast<uint32>(transitionTime.count());
+        player->SendDirectMessage(overrideLight.Write());
+    }
 }
 
 void Map::UpdateAreaDependentAuras()

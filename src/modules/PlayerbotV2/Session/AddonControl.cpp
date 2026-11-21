@@ -1,4 +1,4 @@
-﻿#include "AddonControl.h"
+#include "AddonControl.h"
 
 #include "Bot/BotAI.h"
 #include "Bot/BotCommandParser.h"
@@ -28,6 +28,7 @@
 #include "DatabaseEnv.h"
 #include "GameTime.h"
 #include "Item.h"
+#include "MotionMaster.h"
 #include "Group.h"
 #include "Language.h"
 #include "Log.h"
@@ -39,6 +40,8 @@
 #include "RBAC.h"
 #include "World.h"
 #include "WorldSession.h"
+#include "TradeData.h"
+#include "TradePackets.h"
 
 #include <array>
 #include <cctype>
@@ -202,7 +205,7 @@ void SendAddonRaw(WorldSession* sess, std::string const& body)
     if (!sess) return;
     Player* p = sess->GetPlayer();
     if (!p) return;
-    if (SysReply(sess->GetAccountId()))
+    if (SysReply(sess->GetAccountId()) || body.find("|1|1|BOT_TRADE_RESP|") != std::string::npos)
     {
         WorldPackets::Chat::Chat sys;
         sys.Initialize(CHAT_MSG_SYSTEM, LANG_UNIVERSAL, nullptr, nullptr, std::string(kSysMarker) + body);
@@ -1244,6 +1247,10 @@ void HandleSelfToggle(uint32 client_seq, WorldSession* sess,
         else if (action == HumanLoginAction::SkipThisLogin)
             Services::Lifecycle().unmark_as_bot_transient(id);
         Services::Owners().ClearOwner(id);
+        // The bot logic's last move (a path to a quest giver, a follow, a chase) is a server spline the client cannot steer out of:
+        // it kept the character for up to a minute after `off` (Discord 11-20, Oxide). Stop it before handing control back.
+        me->GetMotionMaster()->Clear();
+        me->StopMoving();
         // Return movement control to the WoW client — the human takes
         // the wheel back. Pairs with the on-branch SetClientControl.
         me->SetClientControl(me, true);
@@ -1595,13 +1602,52 @@ void HandleLogoutReq(uint32 /*client_seq*/, WorldSession* sess,
 // ----------------------------------------------------------------------------
 // Main dispatcher. Called once a complete logical frame is assembled.
 // ----------------------------------------------------------------------------
+// Snapshot both offers and the unique trade window. Delayed addon messages
+// cannot authorize a different trade or an offer that changed after the click.
+void HandleBotTrade(WorldSession* session, uint32 seq, bool commit, std::vector<std::string> const& fields)
+{
+    Player* player = session->GetPlayer();
+    TradeData* mine = player ? player->GetTradeData() : nullptr;
+    Player* partner = mine ? mine->GetTrader() : nullptr;
+    TradeData* theirs = partner ? partner->GetTradeData() : nullptr;
+    if (!theirs || theirs->GetTrader() != player || !Services::Initialized() ||
+        !Services::SessionMgr().IsHeadless(partner->GetGUID()))
+    {
+        SendFields(session, seq, "BOT_TRADE_RESP", {"unavailable"});
+        return;
+    }
+
+    std::string token = std::to_string(mine->GetSerial()) + ":" +
+        std::to_string(mine->GetServerStateIndex()) + ":" + std::to_string(theirs->GetServerStateIndex());
+    if (!commit)
+    {
+        SendFields(session, seq, "BOT_TRADE_RESP", {"ready", token, std::string(partner->GetName()), mine->IsAccepted() ? "1" : "0"});
+        return;
+    }
+    if (fields.size() != 1 || fields.front() != token || mine->IsAccepted() ||
+        mine->IsInAcceptProcess() || theirs->IsInAcceptProcess())
+    {
+        SendFields(session, seq, "BOT_TRADE_RESP", {"changed"});
+        return;
+    }
+
+    WorldPacket packet(CMSG_ACCEPT_TRADE);
+    packet << theirs->GetServerStateIndex();
+    WorldPackets::Trade::AcceptTrade accept(std::move(packet));
+    accept.Read();
+    session->HandleAcceptTradeOpcode(accept);
+    SendFields(session, seq, "BOT_TRADE_RESP", {"submitted"});
+}
+
 void DispatchAssembled(WorldSession* sess, uint32 seq,
                        std::string const& mtype, std::string const& body)
 {
     TC_LOG_DEBUG("playerbot.v2", "[addon_pbc] {} {} seq {:x} ({} bytes)",
                  sess->GetPlayer() ? sess->GetPlayer()->GetName() : std::string("?"), mtype, seq, body.size());
     auto fields = SplitPipes(body);
-    if      (mtype == "ROSTER_REQ")
+    if (mtype == "BOT_TRADE_VIEW" || mtype == "BOT_TRADE_ACCEPT")
+        HandleBotTrade(sess, seq, mtype == "BOT_TRADE_ACCEPT", fields);
+    else if (mtype == "ROSTER_REQ")
     {
         const uint32 flags = fields.empty() ? 15u
             : uint32(std::strtoul(fields[0].c_str(), nullptr, 10));
@@ -1733,8 +1779,15 @@ bool OnAddonWhisper(Player* sender, Player* /*receiver*/,
         // LOGIN_REQ/LOGOUT_REQ are whitelisted alongside SUMMON: an account
         // with zero owned bots may still log a same-account marked alt in or
         // out (the handlers enforce same-account/ownership themselves).
+        // ROSTER_REQ too: it lists only the sender's own bots, so an account
+        // without any gets an empty roster ("0 bots") instead of silence. Dropped,
+        // the "Your bots" window said "No answer from the server (timeout)"
+        // while bots played on in the player's group (Seniron, Discord
+        // 2026-11-20, two players on one home server: most likely the bots
+        // belong to the other player's account).
         auto owned = Services::Owners().BotsOwnedBy(sess->GetAccountId());
         if (owned.empty()
+            && mtype != "ROSTER_REQ"
             && mtype != "ALTS_REQ"
             && mtype != "SUMMON"
             && mtype != "LOGIN_REQ"
@@ -1743,6 +1796,8 @@ bool OnAddonWhisper(Player* sender, Player* /*receiver*/,
             && mtype != "PING"
             && mtype != "LFG_REQ"
             && mtype != "POP_REQ"
+            && mtype != "BOT_TRADE_VIEW"
+            && mtype != "BOT_TRADE_ACCEPT"
             && mtype != "ASSIGN_REQ")
             return false;
     }

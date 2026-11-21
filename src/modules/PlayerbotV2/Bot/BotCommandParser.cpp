@@ -1,6 +1,7 @@
 ﻿#include "BotCommandParser.h"
 #include "Api/BotLanguage.h"
 #include "GroupOrderText.h"   // ClassifyGroupOrder: which refused whispers get an answer
+#include "BotBridgeFormat.h"   // Bridge::SafeOrder: the orders an unowned bot takes from its group
 #include "GroupControl.h"
 #include "BotIntent.h"
 #include "BotIntentEmitter.h"
@@ -35,6 +36,7 @@
 #include "Util.h"  // Trinity::Tokenize for /diag multi-line output
 #include "BotSnapshot.h"
 #include "Gear/BotGearGenerator.h"   // PlanEquipOrder (equip orders)
+#include "ResistGear.h"              // the Onyxia Scale Cloak ("use <item link>")
 #include "BotSnapshotView.h"
 #include "BotAI.h"
 #include "Dungeon/MarkCc.h"  // MarkCc::IsMarkCcClass for "assign" default roles
@@ -54,9 +56,14 @@
 #include "SpellInfo.h"     // SpellInfo for /spell <id>
 #include "SpellMgr.h"      // sSpellMgr for /spell lookup
 #include "Bag.h"  // MAX_BAG_SIZE for /mailitem bag walk
+#include "TradeData.h"     // "enchant <item>" opens a trade
+#include "TradePackets.h"
+#include "WorldSession.h"
 #include "Group.h"
 #include "Chat.h"
 #include "Map.h"
+#include "MapManager.h"
+#include "InstanceLockMgr.h"
 #include "DB2Stores.h"
 #include "World.h"
 #include "GameTime.h"
@@ -81,6 +88,7 @@
 #include <cmath>     // std::sqrt for /inrange distance calc
 #include <cctype>
 #include <cstring>
+#include <array>
 #include <string_view>
 #include <deque>
 #include <mutex>
@@ -1805,6 +1813,16 @@ bool BotCommandParser::OrderRelease(Player const* sender, Player const* bot, cha
     return true;
 }
 
+void BotCommandParser::DeclareRole(Player* bot, Role role)
+{
+    if (!bot)
+        return;
+    if (BotAI* ai = Services::Registry().ai(bot->GetGUID().GetCounter()))
+        ai->set_role_override(role);
+    ApplyClassicRoleSpec(bot, role);
+    PersistDeclaredRole(bot, role);
+}
+
 void BotCommandParser::ReleaseOwnerFollowOrder(Player const* sender, Player const* bot, char const* why)
 {
     if (!bot) return;
@@ -2347,9 +2365,394 @@ bool BotCommandParser::ApplyPlaceOrder(Player* sender, std::string const& line, 
         if (anchor.empty() && (word == "here" || word == "target" || word == "cursor")) { anchor = word; continue; }
         who.push_back(word);
     }
+    // One order, one answer: the same place order from the same player again within kSameOrderMs is the same click reaching more than one
+    // bot (a whisper to each, the add-on's route), not a new order. Karrz, 2026-11-14 15:24: "39 bot(s) in a line (tight gap) in front of
+    // you. ..." seven times and more in his chat for one click.
+    constexpr uint32 kSameOrderMs = 3000;
+    static std::unordered_map<uint64, std::pair<std::string, uint32>> s_lastPlace;
+    uint32 const nowMs = GameTime::GetGameTimeMS();
+    auto& last = s_lastPlace[sender->GetGUID().GetCounter()];
+    if (last.first == n && nowMs - last.second < kSameOrderMs)
+        return true;
+    last = { n, nowMs };
     PlaceResult const r = PlaceBots(sender, shape, gap, anchor, who, via);
     ChatHandler(sender->GetSession()).PSendSysMessage("%s", r.line.c_str());
     return true;
+}
+
+// True when a bot of the sender's in his group has the lead on or paused (every bot of his carries the same state).
+static bool LeadEngagedFor(Player* sender)
+{
+    Group* grp = sender ? sender->GetGroup() : nullptr;
+    if (!grp)
+        return false;
+    for (GroupReference const& itr : grp->GetMembers())
+    {
+        Player* m = itr.GetSource();
+        if (!m || m == sender || !BotCommandParser::ControlsForGroupOrder(sender, m))
+            continue;
+        if (BotAI const* ai = Services::Registry().ai(m->GetGUID().GetCounter()); ai && ai->tank_lead_engaged())
+            return true;
+    }
+    return false;
+}
+
+void BotCommandParser::PauseLeadForOwnerOrder(Player* sender, std::string const& line, char const* via)
+{
+    if (!sender || !sender->GetSession())
+        return;
+    // The order word: past a squad address ("all: stay"), lower case, without a leading '/' or '!'.
+    std::string n = Normalize(line);
+    if (size_t const colon = n.find(':'); colon != std::string::npos)
+        n = Normalize(n.substr(colon + 1));
+    while (!n.empty() && (n.front() == '/' || n.front() == '!' || n.front() == ' '))
+        n.erase(0, 1);
+    ParsedCommand const parsed = SplitArgs(n);
+    std::string const& verb = parsed.verb;
+    bool const manual = verb == "stay" || verb == "halt" || verb == "hold" || verb == "come" || verb == "wait" ||
+                        (verb == "follow" && parsed.tail != "stop" && parsed.tail != "off");
+    if (!manual)
+        return;
+    Group* grp = sender->GetGroup();
+    if (!grp)
+        return;
+    uint32 paused = 0;
+    std::string tank_name;
+    for (GroupReference const& itr : grp->GetMembers())
+    {
+        Player* m = itr.GetSource();
+        if (!m || m == sender || !Services::Registry().has(m->GetGUID().GetCounter()) || !ControlsForGroupOrder(sender, m))
+            continue;
+        BotAI* ai = Services::Registry().ai(m->GetGUID().GetCounter());
+        if (!ai || ai->tank_lead() != BotAI::TankLead::On)
+            continue;
+        ai->set_tank_lead(BotAI::TankLead::Paused);
+        ++paused;
+        if (tank_name.empty() && BotRole(m) == Role::Tank)
+            tank_name = m->GetName();
+    }
+    if (paused == 0)
+        return;
+    TC_LOG_INFO("playerbot.v2", "[tank_lead] {} ({}): \"{}\" pauses the lead for {} bot(s)", sender->GetName(), via ? via : "?", verb, paused);
+    std::string const reply = tank_name.empty()
+        ? std::string("Tank leads is paused: say 'go' when the tank should lead on.")
+        : fmt::format("{} pauses the lead: say 'go' when it should lead on.", tank_name);
+    Playerbot::BotLanguage::LocalizedHandler(sender->GetSession()).PSendSysMessage("%s", reply.c_str());
+}
+
+bool BotCommandParser::IsLeadGoWord(std::string const& line)
+{
+    std::string n = Normalize(line);
+    while (!n.empty() && (n.back() == '!' || n.back() == '.'))
+        n.pop_back();
+    // The Russian testers' words too: "вперед" / "вперёд" / "го", lower case or with a capital (std::tolower leaves Cyrillic alone).
+    static constexpr std::array<std::string_view, 7> kGo = {
+        "go",
+        "\xD0\xB2\xD0\xBF\xD0\xB5\xD1\x80\xD0\xB5\xD0\xB4", "\xD0\x92\xD0\xBF\xD0\xB5\xD1\x80\xD0\xB5\xD0\xB4",   // вперед, Вперед
+        "\xD0\xB2\xD0\xBF\xD0\xB5\xD1\x80\xD1\x91\xD0\xB4", "\xD0\x92\xD0\xBF\xD0\xB5\xD1\x80\xD1\x91\xD0\xB4",   // вперёд, Вперёд
+        "\xD0\xB3\xD0\xBE", "\xD0\x93\xD0\xBE" };                                                                 // го, Го
+    return std::find(kGo.begin(), kGo.end(), n) != kGo.end();
+}
+
+bool BotCommandParser::ApplyLeadOrder(Player* sender, std::string const& line, char const* via)
+{
+    std::string n = line;
+    std::transform(n.begin(), n.end(), n.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    std::istringstream in(n);
+    std::string verb, word, extra;
+    in >> verb;
+    if (!sender || !sender->GetSession())
+        return false;
+    // "go" alone picks a paused lead back up (Karrz, 2026-11-13: Stay and Follow pause the lead, "go" goes on). It is the lead's word
+    // only while the tank leads or is paused; otherwise it stays the chat cue it was (BotChatReactor).
+    bool const go_word = IsLeadGoWord(line);
+    if (verb != "lead" && !go_word)
+        return false;
+    in >> word >> extra;
+    if (go_word && !LeadEngagedFor(sender))
+        return false;
+    Playerbot::BotLanguage::LocalizedHandler answer(sender->GetSession());
+    BotAI::TankLead want = BotAI::TankLead::On;
+    if (go_word || word.empty() || word == "on" || word == "start" || word == "go" || word == "resume")
+        want = BotAI::TankLead::On;
+    else if (word == "pause" || word == "hold" || word == "wait")
+        want = BotAI::TankLead::Paused;
+    else if (word == "off" || word == "stop")
+        want = BotAI::TankLead::Off;
+    else
+    {
+        answer.PSendSysMessage("%s", "Tank leads: say 'lead on' (your tank bot leads the dungeon), 'lead pause' (it holds) or 'lead off' (you lead again).");
+        return true;
+    }
+    if (!extra.empty())
+    {
+        answer.PSendSysMessage("%s", "Tank leads: say 'lead on' (your tank bot leads the dungeon), 'lead pause' (it holds) or 'lead off' (you lead again).");
+        return true;
+    }
+    Group* grp = sender->GetGroup();
+    if (!grp)
+    {
+        answer.PSendSysMessage("%s", "You have no group yet: add a bot first.");
+        return true;
+    }
+    // A raid group is led too (Karrz, 2026-11-14): its main tank leads the trash and stops before each boss for the player. A party that
+    // is not a raid group on a raid map follows its owner (raid_map_party_hold), so the lead waits for the raid group there.
+    bool const raid = grp->isRaidGroup();
+    Map const* here = sender->GetMap();
+    if (want != BotAI::TankLead::Off && !raid && here && here->IsRaid())
+    {
+        answer.PSendSysMessage("%s", "In a raid the tank leads a raid group: convert your party to a raid first, then say 'lead on'.");
+        return true;
+    }
+    std::vector<Player*> bots;
+    Player* tank = nullptr;
+    for (GroupReference const& itr : grp->GetMembers())
+    {
+        Player* m = itr.GetSource();
+        if (!m || m == sender) continue;
+        if (!Services::Registry().has(m->GetGUID().GetCounter()) || !ControlsForGroupOrder(sender, m)) continue;
+        bots.push_back(m);
+        if (BotRole(m) != Role::Tank)
+            continue;
+        // In a raid the main tank (the raid frame's Main Tank mark) leads: the autopilot's pulls are its own (pve_order.main_tank).
+        bool const main = raid && (grp->GetMemberFlags(m->GetGUID()) & MEMBER_FLAG_MAINTANK) != 0;
+        bool const tank_main = tank && raid && (grp->GetMemberFlags(tank->GetGUID()) & MEMBER_FLAG_MAINTANK) != 0;
+        if (!tank || (main && !tank_main) || (main == tank_main && !tank->IsAlive() && m->IsAlive()))
+            tank = m;
+    }
+    if (bots.empty())
+    {
+        answer.PSendSysMessage("%s", "No bot of yours in the group.");
+        return true;
+    }
+    if (want != BotAI::TankLead::Off && !tank)
+    {
+        answer.PSendSysMessage("%s", "None of your bots in the group is a tank: add one (.bot add warrior tank), then say 'lead on'.");
+        return true;
+    }
+    if (want == BotAI::TankLead::Paused)
+    {
+        BotAI const* tai = Services::Registry().ai(tank->GetGUID().GetCounter());
+        if (!tai || !tai->tank_lead_engaged())
+        {
+            answer.PSendSysMessage("%s", "Your tank does not lead now: say 'lead on' first.");
+            return true;
+        }
+    }
+    bool const in_dungeon = here && here->IsDungeon();   // a 5-man or a raid map
+    bool const in_raid = in_dungeon && here->IsRaid();
+    // "go" at a raid boss: the tank stands before it (tank_lead_boss_wait) and the player hands it the pull.
+    uint32 boss_go = 0;
+    if (go_word && raid)
+        for (Player* m : bots)
+            if (BotAI const* ai = Services::Registry().ai(m->GetGUID().GetCounter()); ai && ai->tank_lead() == BotAI::TankLead::On &&
+                ai->tank_lead_boss_wait() != 0)
+            {
+                boss_go = ai->tank_lead_boss_wait();
+                break;
+            }
+    uint32 changed = 0;
+    for (Player* m : bots)
+    {
+        BotAI* ai = Services::Registry().ai(m->GetGUID().GetCounter());
+        if (!ai) continue;
+        if (ai->set_tank_lead(want)) ++changed;
+        if (want == BotAI::TankLead::On)
+        {
+            // The lead replaces the owner's follow, stay and fall-back orders (each would hold the autopilot), and re-arms a run
+            // a "run stop" turned off.
+            ai->exit_manual();
+            ai->release_owner_lead(false);
+            Map const* bm = m->GetMap();
+            if (bm && bm->IsDungeon() && ai->dungeon_run_mode() != BotAI::DungeonRunMode::Active)
+                ai->set_dungeon_run_mode(BotAI::DungeonRunMode::Active);
+            if (boss_go != 0)
+                ai->set_tank_lead_boss_go(boss_go);
+        }
+        else
+        {
+            ai->set_tank_lead_boss_wait(0);
+            ai->set_tank_lead_boss_go(0);
+        }
+    }
+    std::string const name = tank ? tank->GetName() : std::string();
+    std::string reply;
+    switch (want)
+    {
+        case BotAI::TankLead::On:
+            if (boss_go != 0)
+                reply = fmt::format("{} pulls the boss.", name);
+            else if (go_word)
+                reply = fmt::format("{} leads on.", name);
+            else if (in_raid)
+                reply = fmt::format("{} leads the raid now: it pulls pack by pack, waits for mana and for you, and stops before each boss for you to pull "
+                                    "(or say 'go'). Say 'lead pause' to hold, 'lead off' to lead yourself.", name);
+            else if (in_dungeon)
+                reply = fmt::format("{} leads the dungeon now: it pulls pack by pack and waits for mana and for you. Say 'lead pause' to hold, 'lead off' to lead yourself.", name);
+            else
+                reply = fmt::format("{} leads once you are inside a dungeon or a raid. Say 'lead off' to lead yourself.", name);
+            break;
+        case BotAI::TankLead::Paused:
+            reply = fmt::format("{} holds here and pulls nothing until you say 'go'.", name);
+            break;
+        default:
+            reply = "You lead again: your bots follow you.";
+            break;
+    }
+    TC_LOG_INFO("playerbot.v2", "[tank_lead] {} ({}): lead {} for {} bot(s) ({} changed), tank {}, {}{}", sender->GetName(), via ? via : "?",
+                want == BotAI::TankLead::On ? "on" : want == BotAI::TankLead::Paused ? "pause" : "off", bots.size(), changed,
+                name.empty() ? "-" : name, in_raid ? "in a raid" : in_dungeon ? "in a dungeon" : "outside a dungeon",
+                boss_go != 0 ? fmt::format(", boss pull for entry {}", boss_go) : std::string());
+    answer.PSendSysMessage("%s", reply.c_str());
+    return true;
+}
+
+namespace
+{
+// One owner's raid reset in progress (ApplyRaidResetOrder): the instances to close, who to unbind, until when to keep trying.
+struct RaidResetJob
+{
+    ObjectGuid owner;
+    std::vector<ObjectGuid> who;                           // the owner and his bots
+    std::vector<std::pair<uint32, uint32>> instances;      // map id, instance id
+    std::vector<uint32> maps;                              // the raid maps whose locks are cleared
+    uint32 next_ms = 0;
+    uint32 give_up_ms = 0;
+};
+std::vector<RaidResetJob> s_raidResets;
+constexpr uint32 kRaidResetStepMs = 1000;
+constexpr uint32 kRaidResetGiveUpMs = 30000;
+}
+
+bool BotCommandParser::ApplyRaidResetOrder(Player* sender, std::string const& line, char const* via)
+{
+    std::string n = line;
+    std::transform(n.begin(), n.end(), n.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    if ((n != "raid reset" && n != "reset raid") || !sender || !sender->GetSession())
+        return false;
+    ChatHandler handler(sender->GetSession());
+    uint32 const now = GameTime::GetGameTimeMS();
+    for (RaidResetJob const& job : s_raidResets)
+        if (job.owner == sender->GetGUID())
+        {
+            handler.PSendSysMessage("%s", "A raid reset is already under way.");
+            return true;
+        }
+    if (sender->GetMap() && sender->GetMap()->IsRaid())
+    {
+        handler.PSendSysMessage("%s", "Leave the raid first, then reset it: your bots come out to you.");
+        return true;
+    }
+    RaidResetJob job;
+    job.owner = sender->GetGUID();
+    job.who.push_back(sender->GetGUID());
+    uint32 pulled = 0;
+    if (Group* grp = sender->GetGroup())
+        for (GroupReference const& itr : grp->GetMembers())
+        {
+            Player* m = itr.GetSource();
+            if (!m || m == sender || !Services::Registry().has(m->GetGUID().GetCounter()) || !ControlsForGroupOrder(sender, m))
+                continue;
+            job.who.push_back(m->GetGUID());
+            Map* map = m->GetMap();
+            if (!map || !map->IsRaid())
+                continue;
+            std::pair<uint32, uint32> const inst{ map->GetId(), map->GetInstanceId() };
+            if (std::find(job.instances.begin(), job.instances.end(), inst) == job.instances.end())
+                job.instances.push_back(inst);
+            if (!m->IsAlive())
+                m->ResurrectPlayer(1.0f);
+            m->CombatStop(true);
+            m->TeleportTo(sender->GetMapId(), sender->GetPositionX(), sender->GetPositionY(), sender->GetPositionZ(), sender->GetOrientation());
+            ++pulled;
+        }
+    // The raids to clear: the ones the bots were in, else every raid the owner holds a lock on.
+    for (auto const& [map, inst] : job.instances)
+        if (std::find(job.maps.begin(), job.maps.end(), map) == job.maps.end())
+            job.maps.push_back(map);
+    if (job.maps.empty())
+        for (InstanceLock const* lock : sInstanceLockMgr.GetInstanceLocksForPlayer(sender->GetGUID()))
+            if (MapEntry const* me = sMapStore.LookupEntry(lock->GetMapId()); me && me->IsRaid() && !lock->IsExpired() &&
+                std::find(job.maps.begin(), job.maps.end(), lock->GetMapId()) == job.maps.end())
+            {
+                job.maps.push_back(lock->GetMapId());
+                if (sMapMgr->FindMap(lock->GetMapId(), lock->GetInstanceId()))
+                    job.instances.push_back({ lock->GetMapId(), lock->GetInstanceId() });
+            }
+    if (job.maps.empty())
+    {
+        handler.PSendSysMessage("%s", "Nothing to reset: you and your bots hold no raid lock.");
+        return true;
+    }
+    job.next_ms = now + kRaidResetStepMs;
+    job.give_up_ms = now + kRaidResetGiveUpMs;
+    TC_LOG_INFO("playerbot.v2", "[raid_reset] {} ({}): {} bots pulled out, {} instance(s), {} raid(s), {} characters", sender->GetName(),
+                via ? via : "?", pulled, job.instances.size(), job.maps.size(), job.who.size());
+    handler.PSendSysMessage("Raid reset: %u bot(s) come out to you; the raid is closed and your locks are cleared in a few seconds.", pulled);
+    s_raidResets.push_back(std::move(job));
+    return true;
+}
+
+void BotCommandParser::TickRaidResets()
+{
+    if (s_raidResets.empty())
+        return;
+    uint32 const now = GameTime::GetGameTimeMS();
+    for (auto it = s_raidResets.begin(); it != s_raidResets.end();)
+    {
+        RaidResetJob& job = *it;
+        if (now < job.next_ms)
+        {
+            ++it;
+            continue;
+        }
+        job.next_ms = now + kRaidResetStepMs;
+        // 1. Close each emptied instance: Expire is the one reset a raid with a boss down allows, and an empty map unloads at the next
+        //    update, which releases the locks it holds ("lock in use by map" while it stays loaded).
+        bool waiting = false;
+        for (auto const& [mapId, instanceId] : job.instances)
+            if (Map* map = sMapMgr->FindMap(mapId, instanceId))
+            {
+                waiting = true;
+                if (InstanceMap* im = map->ToInstanceMap(); im && !im->HavePlayers())
+                    im->Reset(InstanceResetMethod::Expire);
+            }
+        Player* owner = ObjectAccessor::FindConnectedPlayer(job.owner);
+        if (waiting && now < job.give_up_ms)
+        {
+            ++it;
+            continue;
+        }
+        // 2. Clear the locks and the group's memory of the old instance, so the next entry opens a fresh one.
+        uint32 cleared = 0, inUse = 0;
+        for (uint32 mapId : job.maps)
+            for (ObjectGuid const& guid : job.who)
+            {
+                std::vector<InstanceLock const*> done, failed;
+                sInstanceLockMgr.ResetInstanceLocksForPlayer(guid, mapId, {}, &done, &failed);
+                cleared += uint32(done.size());
+                for (InstanceLock const* lock : failed)
+                    inUse += lock->GetMapId() == mapId;
+                if (Player* p = ObjectAccessor::FindConnectedPlayer(guid))
+                    p->SetRecentInstance(mapId, 0);
+            }
+        if (owner)
+            if (Group* grp = owner->GetGroup())
+                for (uint32 mapId : job.maps)
+                    grp->SetRecentInstance(mapId, owner->GetGUID(), 0);
+        TC_LOG_INFO("playerbot.v2", "[raid_reset] {}: {} lock(s) cleared, {} still in use{}", owner ? owner->GetName() : job.owner.ToString(),
+                    cleared, inUse, waiting ? " (an instance did not close in time)" : "");
+        if (owner && owner->GetSession())
+        {
+            ChatHandler handler(owner->GetSession());
+            if (inUse || waiting)
+                handler.PSendSysMessage("Raid reset: %u lock(s) cleared, but someone is still inside, so that raid stays as it is. "
+                                        "Get everyone out and reset again.", cleared);
+            else
+                handler.PSendSysMessage("Raid reset done: %u lock(s) cleared. The next time you go in, the raid is fresh.", cleared);
+        }
+        it = s_raidResets.erase(it);
+    }
 }
 
 bool BotCommandParser::Dispatch(Player* sender, Player* bot, std::string const& msg, char const* via)
@@ -2361,6 +2764,13 @@ bool BotCommandParser::Dispatch(Player* sender, Player* bot, std::string const& 
     // "place <shape> ..." (the Positions tab's words typed or whispered): the owner's whole set at once, answered once.
     if (ApplyPlaceOrder(sender, msg, via))
         return true;
+    if (ApplyRaidResetOrder(sender, msg, via))
+        return true;
+    // "lead on|pause|off": the whole group's lead, set on every bot of the sender's at once, answered once.
+    if (ApplyLeadOrder(sender, msg, via))
+        return true;
+    // Stay / Hold / Follow / Come while the tank leads pause the lead; the order itself goes on as usual.
+    PauseLeadForOwnerOrder(sender, msg, via);
     // A crowd-control order ("@warlock no fear", "off cc") is the owner's, not each bot's: stored once, answered once.
     if (ApplyCcOrder(sender, msg, via))
         return true;
@@ -2548,7 +2958,20 @@ bool BotCommandParser::DispatchSingle(Player* sender, Player* bot, std::string c
     // [owner_order]: one line per order a bot receives (source, raw text, the order state it
     // left), so an ignored order is visible in the log. Unrecognised / refused text is throttled
     // per bot (whispered chatter reaches here too). Chat handlers can run on map-update threads.
-    bool const authorized = IsAuthorized(sender, bot);
+    // A bot nobody owns (a world bot that took a player's invite, a listed group's bot) takes from its group only the group orders
+    // (follow, stay, attack, formation, the owner words party chat takes: GroupOrderText.cpp) and the orders a bridge reply may give
+    // (Bridge::SafeOrder: craft, sell junk, tactics, ...). The rest of the parser is an owner's: from any group member "mailsend",
+    // "mailitem", "ah", "guildbank", "tele" or "abandonall" mailed out the bot's gold and gear, sold it, moved it or dropped its
+    // quests (Playerbot.Interact.AcceptInvitesFrom = anyone lets every player group with a world bot). Its owner and a GM keep every
+    // order.
+    bool authorized = IsAuthorized(sender, bot);
+    if (authorized && Services::Owners().GetOwner(bot->GetGUID().GetCounter()).account_id == 0 &&
+        !(sender->GetSession() && sender->GetSession()->GetSecurity() >= SEC_GAMEMASTER) &&
+        !::Playerbot::V2::ClassifyGroupOrder(msg, Services::Config().behavior_owner_commands()))
+    {
+        std::string norm, why;
+        authorized = ::Playerbot::Bridge::SafeOrder(msg, norm, why);
+    }
     bool const handled = authorized && DispatchSingleImpl(sender, bot, msg);
     // A whispered order the bot may not take was dropped without a word, so the player could not tell it from a broken command
     // (Gremloc 11-08: "gear" and "equip upgrades" got no answer). Say why, for the order words only (small talk still goes to the
@@ -2640,6 +3063,144 @@ static bool OrderEquip(Player* sender, Player* bot, std::string const& n)
     return true;
 }
 
+// The piece "enchant <...>" names: an item link or id, a slot word ("chest", "cloak", "weapon"), or words of its name. Worn gear first,
+// then the bags.
+static Item* FindEnchantPiece(Player* bot, std::string const& arg)
+{
+    uint32 entry = 0;
+    if (size_t const p = arg.find("item:"); p != std::string::npos)
+    {
+        for (size_t i = p + 5; i < arg.size() && std::isdigit(static_cast<unsigned char>(arg[i])) && entry < 100000000u; ++i)
+            entry = entry * 10 + uint32(arg[i] - '0');
+    }
+    else if (std::all_of(arg.begin(), arg.end(), [](unsigned char c) { return std::isdigit(c) != 0; }) && arg.size() < 10)
+        entry = uint32(std::stoul(arg));
+    std::string words = arg;
+    if (size_t const a = arg.find('['); a != std::string::npos)
+        if (size_t const b = arg.find(']', a); b != std::string::npos)
+            words = arg.substr(a + 1, b - a - 1);
+    if (!entry)
+    {
+        static std::pair<char const*, uint8> const kSlots[] = {
+            { "head", EQUIPMENT_SLOT_HEAD }, { "helm", EQUIPMENT_SLOT_HEAD }, { "neck", EQUIPMENT_SLOT_NECK },
+            { "shoulder", EQUIPMENT_SLOT_SHOULDERS }, { "shoulders", EQUIPMENT_SLOT_SHOULDERS }, { "back", EQUIPMENT_SLOT_BACK },
+            { "cloak", EQUIPMENT_SLOT_BACK }, { "cape", EQUIPMENT_SLOT_BACK }, { "chest", EQUIPMENT_SLOT_CHEST }, { "wrist", EQUIPMENT_SLOT_WRISTS },
+            { "wrists", EQUIPMENT_SLOT_WRISTS }, { "bracers", EQUIPMENT_SLOT_WRISTS }, { "hands", EQUIPMENT_SLOT_HANDS },
+            { "gloves", EQUIPMENT_SLOT_HANDS }, { "waist", EQUIPMENT_SLOT_WAIST }, { "belt", EQUIPMENT_SLOT_WAIST }, { "legs", EQUIPMENT_SLOT_LEGS },
+            { "pants", EQUIPMENT_SLOT_LEGS }, { "feet", EQUIPMENT_SLOT_FEET }, { "boots", EQUIPMENT_SLOT_FEET }, { "ring", EQUIPMENT_SLOT_FINGER1 },
+            { "finger", EQUIPMENT_SLOT_FINGER1 }, { "weapon", EQUIPMENT_SLOT_MAINHAND }, { "main hand", EQUIPMENT_SLOT_MAINHAND },
+            { "mainhand", EQUIPMENT_SLOT_MAINHAND }, { "off hand", EQUIPMENT_SLOT_OFFHAND }, { "offhand", EQUIPMENT_SLOT_OFFHAND },
+            { "shield", EQUIPMENT_SLOT_OFFHAND } };
+        std::string w = words;
+        if (w.rfind("my ", 0) == 0) w.erase(0, 3);
+        if (w.rfind("your ", 0) == 0) w.erase(0, 5);
+        for (auto const& [word, slot] : kSlots)
+            if (w == word)
+                return bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
+    }
+    std::vector<Item*> pieces;
+    for (uint8 s = EQUIPMENT_SLOT_START; s < EQUIPMENT_SLOT_END; ++s)
+        if (Item* it = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s))
+            pieces.push_back(it);
+    for (uint8 s = INVENTORY_SLOT_ITEM_START; s < INVENTORY_SLOT_ITEM_END; ++s)
+        if (Item* it = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s))
+            pieces.push_back(it);
+    for (uint8 b = INVENTORY_SLOT_BAG_START; b < INVENTORY_SLOT_BAG_END; ++b)
+        if (Bag* bag = bot->GetBagByPos(b))
+            for (uint32 s = 0; s < bag->GetBagSize(); ++s)
+                if (Item* it = bag->GetItemByPos(uint8(s)))
+                    pieces.push_back(it);
+    auto name_of = [](Item const* it)
+    {
+        std::string n = it->GetTemplate()->GetName(DEFAULT_LOCALE);
+        std::transform(n.begin(), n.end(), n.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+        return n;
+    };
+    if (entry)
+    {
+        for (Item* it : pieces)
+            if (it->GetEntry() == entry)
+                return it;
+        return nullptr;
+    }
+    if (words.empty())
+        return nullptr;
+    for (Item* it : pieces)
+        if (name_of(it) == words)
+            return it;
+    for (Item* it : pieces)
+        if (name_of(it).find(words) != std::string::npos)
+            return it;
+    return nullptr;
+}
+
+// "enchant <item link, name or slot>": the owner puts an enchant on one of the bot's pieces, worn or in its bags. The bot opens a
+// trade with him, puts the piece in the "will not be traded" slot and accepts once his enchant is on it (TradeShop::StoreEnchantJob,
+// TradeShop::Step); nothing changes hands. Its owner only: anyone else could not even see what the window is for.
+static bool OrderEnchant(Player* sender, Player* bot, std::string const& n)
+{
+    auto say = [&](std::string const& text) { Push(bot, WhisperIntent{ sender->GetName(), text }); };
+    BotId const bot_id = bot->GetGUID().GetCounter();
+    if (Services::Owners().GetOwner(bot_id).account_id == 0 ||
+        !Services::Owners().IsOwner(bot_id, sender->GetSession() ? sender->GetSession()->GetAccountId() : 0, sender->GetGUID().GetCounter()))
+    {
+        say("only the player i belong to can enchant my gear");
+        return true;
+    }
+    std::string arg = n.size() > 7 ? n.substr(7) : std::string();
+    while (!arg.empty() && arg.front() == ' ') arg.erase(arg.begin());
+    while (!arg.empty() && arg.back() == ' ') arg.pop_back();
+    if (arg.empty())
+    {
+        say("enchant what? link the piece, or say its name or slot (chest, cloak, weapon...)");
+        return true;
+    }
+    Item* const piece = FindEnchantPiece(bot, arg);
+    if (!piece)
+    {
+        say("i can't find that, not worn and not in my bags");
+        return true;
+    }
+    std::string const name = piece->GetTemplate()->GetName(DEFAULT_LOCALE);
+    // As "trade me" (BotBridge RunTrade): a window already open between the two of them is used, the trade handler makes the rest of
+    // the checks (faction, logging out, already trading).
+    TradeData* const open = bot->GetTradeData();
+    bool const same_window = open && open->GetTrader() == sender;
+    if (open && !same_window)
+    {
+        say("i'm trading with someone else right now");
+        return true;
+    }
+    if (!same_window && sender->GetTradeData())
+    {
+        say("you're already trading with someone");
+        return true;
+    }
+    if (sender->GetMap() != bot->GetMap() || !bot->IsWithinDistInMap(sender, TRADE_DISTANCE - 1.0f))
+    {
+        say("come closer so we can trade");
+        return true;
+    }
+    if (!same_window)
+    {
+        WorldPacket packet(CMSG_INITIATE_TRADE);
+        WorldPackets::Trade::InitiateTrade init(std::move(packet));
+        init.Guid = sender->GetGUID();
+        bot->GetSession()->HandleInitiateTradeOpcode(init);
+    }
+    TradeData* const window = bot->GetTradeData();
+    if (!window || window->GetTrader() != sender)
+    {
+        say("the trade did not open");
+        return true;
+    }
+    ::Playerbot::TradeShop::StoreEnchantJob(bot, sender->GetGUID(), piece->GetGUID(), window->GetSerial());
+    say(name + " goes in the bottom slot of the trade: put your enchant on it and accept");
+    TC_LOG_INFO("playerbot.v2", "[owner_order] [enchant] {} <- {}: \"{}\" -> {} ({}) in the not-traded slot, window {}", bot->GetName(),
+        sender->GetName(), n, name, piece->IsEquipped() ? "worn" : "bags", window->GetSerial());
+    return true;
+}
+
 // "gear t3" / "gear bis" / "gear mode best" / "gear match": the owner's gear mode for every companion it owns (Gear::Owned::GearMode), stored per
 // account and acted on by every bot at once; one bot of the group (the lowest id) tells the owner what was set. False when the words
 // after "gear" name no mode, so "gear" with anything else still reaches the older verb.
@@ -2658,7 +3219,7 @@ static bool OrderGearMode(Player* sender, Player* bot, std::string const& n)
     if (account == 0)
         return false;
     std::string reply;
-    bool const ok = Services::Population().SetOwnerGearMode(account, uint8(mode), reply);
+    bool const ok = Services::Population().SetOwnerGearMode(account, uint8(mode), reply, sender);
     // One answer for the whole group: the lowest id among the owner's bots in the sender's group.
     BotId lowest = id;
     if (Group const* g = sender->GetGroup())
@@ -2872,10 +3433,39 @@ bool BotCommandParser::DispatchSingleImpl(Player* sender, Player* bot, std::stri
         && OrderTalentCode(sender, bot, normalized))
         return true;
 
+    // The owner enchants one of the bot's pieces through a trade window: enchant <item link, name or slot>. Whispered to one bot only.
+    if (normalized.rfind("enchant ", 0) == 0 && t_direct_whisper)
+        return OrderEnchant(sender, bot, normalized);
+
     // Gear orders: equip <item|upgrades|best>, use your best gear.
     if (normalized == "equip" || normalized.rfind("equip ", 0) == 0 || normalized == "use your best gear" ||
         normalized == "wear your best gear")
         return OrderEquip(sender, bot, normalized == "equip" || normalized.rfind("equip ", 0) == 0 ? normalized : std::string("equip best"));
+    // "use <item link>" of a piece to wear is an equip order: in Blackwing Lair Karrz told his raid "use [Onyxia Scale Cloak]" in party chat
+    // and nothing happened, because "use" only knew game objects (dev realm 2026-11-13). Any other link goes on to the "use" verb as before.
+    if (normalized.rfind("use ", 0) == 0)
+        if (size_t const p = normalized.find("item:"); p != std::string::npos)
+        {
+            uint32 entry = 0;
+            for (size_t i = p + 5; i < normalized.size() && std::isdigit(static_cast<unsigned char>(normalized[i])) && entry < 100000000u; ++i)
+                entry = entry * 10 + uint32(normalized[i] - '0');
+            ItemTemplate const* tpl = entry ? sObjectMgr->GetItemTemplate(entry) : nullptr;
+            if (tpl && (tpl->GetClass() == ITEM_CLASS_ARMOR || tpl->GetClass() == ITEM_CLASS_WEAPON) && tpl->GetInventoryType() != INVTYPE_NON_EQUIP)
+            {
+                // Said to the whole raid: a bot that wears it already stays quiet, and so does one whose Onyxia Scale Cloak the cloak rule
+                // puts on (idle:classic_onyxia_cloak), instead of 39 whispers saying so.
+                if (auto snap = Services::Snapshots().latest(bot->GetGUID().GetCounter()))
+                {
+                    for (auto const& worn : snap->inventory.equipped)
+                        if (worn.entry == entry)
+                            return true;
+                    if (entry == ::Playerbot::Classic::kOnyxiaScaleCloak && Services::Config().raid_onyxia_cloak() &&
+                        ::Playerbot::Classic::FightCloakMap(bot->GetMapId()))
+                        return true;
+                }
+                return OrderEquip(sender, bot, "equip" + normalized.substr(3));
+            }
+        }
 
     // Formation and spacing orders (Playerbot.Behavior.Formation), main tank (Playerbot.Behavior.OwnerMainTank).
     // Exact phrases / prefixes, ahead of the verb table ("tight" and "spread" were the old stack / ring formations).
@@ -5312,8 +5902,15 @@ bool BotCommandParser::DispatchSingleImpl(Player* sender, Player* bot, std::stri
           return true; }
         TC_LOG_INFO("playerbot.v2", "[raid_pull] {} pulls {} ({}) {}", bot->GetName(), target->GetName(), target->GetGUID().GetCounter(),
                     by_icon ? "by its icon assignment" : "on the owner's selection");
-        // Raid map: only the main tank pulls (a spare duty tank stands by).
-        if (!RaidPullGateAllows(bot, target))
+        // Raid map: only the main tank pulls (a spare duty tank stands by). A boss whose strike goes to the melee soakers (Patchwerk's
+        // Hateful Strike, RaidRules::meleeSoak) is the exception: the off tanks go in with the main tank, or the main tank is alone in his
+        // reach for the first strike 1.2 s after the pull and dies to it (Karrz 11-15 live: Don in full T3 died at 1 s, the off tanks 25 y back).
+        bool soaker = false;
+        if (Raid::RaidRules const* rules = Raid::RulesForMap(bot->GetMapId()))
+            for (Raid::MeleeSoak const& soak : rules->meleeSoak)
+                if (soak.enemy == target->GetEntry() && soak.who == Raid::Who::OffTank)
+                    soaker = true;
+        if (!soaker && !RaidPullGateAllows(bot, target))
         { Push(bot, WhisperIntent{sender->GetName(), "Tank: the main tank pulls; standing by."});
           return true; }
         Push(bot, StartAttackIntent{target->GetGUID()});
@@ -5518,7 +6115,8 @@ bool BotCommandParser::DispatchSingleImpl(Player* sender, Player* bot, std::stri
     }
     if (cmd == "gather" || cmd == "gather_all" || cmd == "gatherall")
     {
-        // gather on   — picks the herbs and ore veins near it as it follows you, with the gathering skills it has (GatheringRules.cpp)
+        // gather on   — picks the herbs and ore veins near it as it follows you, with the gathering skills it has (GatheringRules.cpp),
+        //               and skins what the group kills once you have looted it (LootDrainRules.cpp)
         // gather off  — leaves them alone again (the default)
         // gather      — toggle. gather_all sets every bot of the group. Memory only; clearprefs turns it off.
         bool const all = cmd != "gather";
@@ -5544,18 +6142,17 @@ bool BotCommandParser::DispatchSingleImpl(Player* sender, Player* bot, std::stri
             return true;
         }
         self_ai->set_gather_ordered(desired);
-        bool const herb = bot->HasSkill(SKILL_HERBALISM), mine = bot->HasSkill(SKILL_MINING);
+        std::string what;
+        for (auto const& [skill, word] : { std::pair{ SKILL_HERBALISM, "herbs" }, std::pair{ SKILL_MINING, "ore" }, std::pair{ SKILL_SKINNING, "skins" } })
+            if (bot->HasSkill(skill))
+                what += (what.empty() ? "" : ", ") + std::string(word);
         std::string reply;
         if (!desired)
             reply = "Gather: OFF";
-        else if (herb && mine)
-            reply = "Gather: ON (herbs and ore)";
-        else if (herb)
-            reply = "Gather: ON (herbs)";
-        else if (mine)
-            reply = "Gather: ON (ore)";
+        else if (!what.empty())
+            reply = fmt::format("Gather: ON ({})", what);
         else
-            reply = "Gather: ON, but I have no Herbalism or Mining";
+            reply = "Gather: ON, but I have no Herbalism, Mining or Skinning";
         Push(bot, WhisperIntent{sender->GetName(), reply});
         return true;
     }
@@ -6998,6 +7595,24 @@ bool BotCommandParser::DispatchSingleImpl(Player* sender, Player* bot, std::stri
             return true;
         }
         uint32 const want_entry = args.empty() ? 0u : uint32(args.front());
+        // The name in any client language: a Russian player names a crate in Russian while its database name is English (zorin44,
+        // Discord 19 Nov: party bots never took the quest crates). Case-insensitive for Cyrillic too, as .lookup does.
+        std::wstring want_w;
+        bool const have_want_w = Utf8toWStr(want, want_w);
+        if (have_want_w)
+            wstrToLower(want_w);
+        auto name_fits = [&](GameObject const* go)
+        {
+            if (!have_want_w)
+                return Normalize(go->GetGOInfo()->name).find(want) != std::string::npos;
+            if (Utf8FitTo(go->GetGOInfo()->name, want_w))
+                return true;
+            if (GameObjectLocale const* loc = sObjectMgr->GetGameObjectLocale(go->GetEntry()))
+                for (std::string const& name : loc->Name)
+                    if (!name.empty() && Utf8FitTo(name, want_w))
+                        return true;
+            return false;
+        };
         std::list<GameObject*> nearby;
         Trinity::GameObjectInRangeCheck check(bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ(), 30.0f);
         Trinity::GameObjectListSearcher<Trinity::GameObjectInRangeCheck> searcher(bot, nearby, check);
@@ -7009,7 +7624,7 @@ bool BotCommandParser::DispatchSingleImpl(Player* sender, Player* bot, std::stri
             if (!go || !go->isSpawned() || go->HasFlag(GO_FLAG_NOT_SELECTABLE))
                 continue;
             bool const match = want_entry != 0 ? go->GetEntry() == want_entry
-                                               : Normalize(go->GetGOInfo()->name).find(want) != std::string::npos;
+                                               : name_fits(go);
             if (!match)
                 continue;
             float const d = bot->GetDistance(go);
@@ -7018,6 +7633,16 @@ bool BotCommandParser::DispatchSingleImpl(Player* sender, Player* bot, std::stri
         if (!best)
         {
             Push(bot, WhisperIntent{sender->GetName(), fmt::format("Use: no '{}' within 30 yards of me.", want)});
+            return true;
+        }
+        // A quest chest (crate, sack, flower) the bot cannot open: API::use_game_object refuses it without a word, so say why here instead
+        // of walking over and standing there.
+        if (best->GetGoType() == GAMEOBJECT_TYPE_CHEST && !best->ActivateToQuest(bot))
+        {
+            Push(bot, WhisperIntent{sender->GetName(), fmt::format("Use: {} holds nothing for me (I don't have its quest, or I have "
+                "what it gives already).", best->GetGOInfo()->name)});
+            TC_LOG_INFO("playerbot.v2", "[owner_use] {} refuses {} (entry {}): no quest of the bot's needs it", bot->GetName(),
+                best->GetGOInfo()->name, best->GetEntry());
             return true;
         }
         BotAI* ai = Services::Registry().ai(bot->GetGUID().GetCounter());

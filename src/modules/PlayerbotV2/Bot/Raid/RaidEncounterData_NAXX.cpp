@@ -29,8 +29,19 @@ namespace Playerbot::Raid {
 
         // ---------------------------------------------------------------------------------------------------------------
         // ANUB'REKHAN (15956): Locust Swarm 28785 is a self buff that pulses damage around him (naxx/classic_boss_anubrekhan.cpp);
-        // the tank kites him, everyone else keeps away until it ends. Radius 30 is the usual swarm range (UNVERIFIED).
-        r.avoidEnemyAura.push_back({ 15956, 28785, 30.0f, Who::NonTank });
+        // the tank kites him, everyone else keeps away until it ends (Classic: 30 y, 20 s after a 3 s cast, Anub slowed 40%, a pacifying
+        // 875-1125 per 2 s DoT that stacks without cap; warcraft.wiki.gg Anub'Rekhan (Classic)).
+        // Everybody leaves, tanks too: the circle's way out for a tank goes sideways to the raid and back toward his pull spot (Escape, the
+        // Geddon idiom), so the boss walks after his tank at 60% speed, which is the kite. naxx_anubrekhan 1114a under Who::NonTank: all four
+        // tanks stood in it (the new Crypt Guard rose at his feet) and died 19 s in with 6.4-7.5k ticks; Anub, loose at 13%, walked into
+        // the raid and wiped it. 38 y, not 30: bots that had reached 32.0-32.7 y were still ticked there (Mchuntd 5260 at 32.0 y,
+        // Mcshadb 3090 at 32.1 y), so the hit reaches past 30 by the two hit boxes; the margin also covers the boss stepping after them.
+        r.avoidEnemyAura.push_back({ 15956, 28785, 38.0f, Who::Anyone });
+        // His tank holds him on the far side from the raid, so the kite's way out (straight away from him, then toward his pull spot)
+        // leads him away from the raid. naxx_anubrekhan 1114b: his tank stood between him and the raid, left the circle with the raid to
+        // the west, he followed it at 34% into the raid, and 40 bots ended against the west wall with "no way out" (44 lines) and 31
+        // Locust Swarm deaths.
+        r.faceAway.push_back({ 15956 });
         r.priority.push_back({ 16573, 3 });     // Crypt Guard: Acid Spit / Web / Cleave (classic_boss_anubrekhan.cpp:65)
         r.priority.push_back({ 16698, 2 });     // Corpse Scarab: spawned from corpses (classic_instance_naxxramas.cpp:1237)
 
@@ -44,6 +55,16 @@ namespace Playerbot::Raid {
         // Worshippers are the enrage counter: after each Enrage 28798 a priest mind-controls one and sacrifices it with Widow's
         // Embrace 28732 on her (RaidMechanics_Naxx.cpp). They have no bot logic; never a DPS target.
         r.priority.push_back({ 16506, -1 });
+        // Each tank holds its own pile, apart (Classic: her tank keeps her, the off tanks keep the Worshippers and Followers away from her
+        // and each other). naxx_faerlina 1114e: all four tanks stood within 5 y of each other at her feet (3350-3355,-3639), so each
+        // Challenging Shout took the whole pack of seven, the tank under it died in 3-4 s (Mctankwa at 4 s, Mctankwc at 10 s), the next
+        // tank shouted and died the same way, and from 38 s on no tank was left. An arc round the raid's camp, 22 y north of it toward her
+        // dais (she spawns at 3353,-3620, the raid lands at 3354,-3660; the floor there is z 259.1), one slot per tank 16 y apart, wider
+        // than a Challenging Shout's 10 y, so no shout reaches the next tank's pile. The ranged and the healers keep to the camp.
+        constexpr float kFaerCampX = 3354.0f, kFaerCampY = -3664.0f, kFaerHealY = -3672.0f, kFaerFloorZ = 259.1f;
+        r.tankSpot.push_back({ 15953, 15953, 22.0f, 16.0f, true, kFaerCampX, kFaerCampY, 90.0f, { 16506u, 16505u } });
+        r.stand.push_back({ 15953, Who::Ranged, kFaerCampX, kFaerCampY, kFaerFloorZ, 6.0f, false, 0 });
+        r.stand.push_back({ 15953, Who::Healer, kFaerCampX, kFaerHealY, kFaerFloorZ, 6.0f, false, 0 });
 
         // ---------------------------------------------------------------------------------------------------------------
         // MAEXXNA (15952): Web Wrap cocoons (16486) hold players until killed; Necrotic Poison 28776 on the tank (-90% healing,
@@ -53,6 +74,10 @@ namespace Playerbot::Raid {
         r.priority.push_back({ 17055, 4 });     // Maexxna Spiderling
         r.dispel.push_back({ 28776, DispelKind::Poison, true });
         r.avoidFrontal.push_back({ 15952, 30.0f, 60.0f, Who::NonTank });
+        // Web Spray (29484) stuns her tank with everyone else for 10 s while she goes on hitting it, every hit landing (no dodge, parry or
+        // block while stunned): 3.2-4.8k a swing on a 12.3k tank (naxx_maexxna r24h, dead 7-9 s into the first spray). The tanks drink a
+        // Greater Stoneshield Potion (+2000 armour, 2 min) when she is engaged, as on Patchwerk.
+        r.resistPotion.push_back({ 15952, 13455, Who::Tank });
 
         // ---------------------------------------------------------------------------------------------------------------
         // NOTH THE PLAGUEBRINGER (15954): Curse of the Plaguebringer 29213 turns into Wrath of the Plaguebringer (4,000 shadow to
@@ -76,10 +101,14 @@ namespace Playerbot::Raid {
         // Mana Burn 29310 every 3 s on mana users within 28 yd in the fight phase: RaidMechanics_Naxx.cpp keeps them out.
 
         // ---------------------------------------------------------------------------------------------------------------
-        // LOATHEB (16011): spores 16286 give the killers a crit buff (naxx/classic_boss_loatheb.cpp:458-466).
+        // LOATHEB (16011): spores 16286 give the killers a crit buff (naxx/classic_boss_loatheb.cpp:458-466). Which melee group kills
+        // each spore is chosen in RaidMechanics_Naxx.cpp (LoathebSporeTargets, one group per spore in turn); the priority stays for a
+        // raid with no melee bot.
         r.priority.push_back({ 16286, 4 });     // Spore
         // Corrupted Mind 29201 hands every priest/druid (29194), paladin (29196) and shaman (29198) a one-heal-per-minute
-        // debuff (:511-546). The heals fail while it lasts, so the healers rotate on their own; it is never dispelled.
+        // debuff (:511-546), never dispelled. Its next heal locks the healer's heals for 60 s (aura 112 misc 4327: Spell::CheckCast
+        // fizzles them); an armed bot healer keeps that one heal for a member that needs it (ApClassicHeal.h EmitHeal) and a locked one
+        // casts none (BotIntentEmitter::heal_locked).
         r.noDispel.push_back(29194);
         r.noDispel.push_back(29196);
         r.noDispel.push_back(29198);
@@ -88,6 +117,9 @@ namespace Playerbot::Raid {
         // INSTRUCTOR RAZUVIOUS (16061): priests mind-control the Deathknight Understudies (16803), which taunt and tank him
         // (RaidMechanics_Naxx.cpp). The understudies must stay alive for that, so DPS never attack them; tanks hold the free ones.
         r.priority.push_back({ 16803, -1 });
+        // Disrupting Shout burns the mana of everybody within 45 y of him (twice the mana as damage): the mana users keep 50 y off
+        // (RaidMechanics_Naxx.cpp, Razuvious: the mind-control priests are moved by the election, which runs after this move).
+        r.avoidEnemy.push_back({ 16061, 50.0f, Who::ManaUser });
 
         // ---------------------------------------------------------------------------------------------------------------
         // GOTHIK THE HARVESTER (16060): waves on both sides (naxx/classic_naxxramas.h:114-120). Riders hit hardest. He teleports
@@ -103,30 +135,72 @@ namespace Playerbot::Raid {
 
         // ---------------------------------------------------------------------------------------------------------------
         // THE FOUR HORSEMEN (16062 Mograine, 16063 Zeliek, 16064 Thane, 16065 Blaumeux): Blaumeux's Void Zones are creatures
-        // 16697 (naxx/classic_boss_four_horsemen.cpp:59,501) pulsing Consumption 28865 (radius index 15 = 3 yd, 3,960 shadow);
-        // 5.5 yd = 3 yd plus combat reach plus a step. Zeliek's Holy Wrath chains between close players.
-        r.avoidCreature.push_back({ 16697, 5.5f, Who::Anyone });
+        // 16697 (naxx/classic_boss_four_horsemen.cpp:59,501) pulsing Consumption 28865 (3,960 shadow). Its hits reach 5 yd, not the 3 of
+        // radius index 15: naxx_horsemen r29 logged both radii (3 and 5) on its hits and seven deaths to it, the bots 3.7-5.9 yd from the
+        // zone, most on a walk round it. 7 yd = 5 yd plus two steps. Zeliek's Holy Wrath chains between close players.
+        r.avoidCreature.push_back({ 16697, 7.0f, Who::Anyone });
         r.spread.push_back({ 16063, 10.0f, Who::Ranged });
         r.spread.push_back({ 16063, 10.0f, Who::Healer });
         // Tank rotation: every mark (cast every 12 s, classic_boss_four_horsemen.cpp:407) stacks, and from the 3rd stack it hurts
-        // (1000 / 3000 / 1000 x stacks). At 3 marks the tank hands its horseman to a tank without that mark, who walks over from
-        // its own corner if it is out of taunt range, and the old tank moves on to a horseman whose mark it does not carry.
-        r.tankSwap.push_back({ 16062, 28834, 3 });  // Highlord Mograine: Mark of Mograine
-        r.tankSwap.push_back({ 16064, 28832, 3 });  // Thane Korth'azz: Mark of Korth'azz
+        // (1000 / 3000 / 1000 x stacks). At 3 marks the tank hands its horseman to a spare tank that waited out of his mark and walked
+        // in to arrive as that third mark lands (HorsemenMove), so it carries the one mark it walked into; the old tank walks out of
+        // his mark before the next one. Only a tank holding no other horseman takes over (naxx_horsemen r29: the four horse tanks were
+        // sent to take each other's horseman at 44 s and dragged theirs out of the corners; no taunt in 219 s).
+        r.tankSwap.push_back({ 16062, 28834, 3, 1, true });  // Highlord Mograine: Mark of Mograine
+        r.tankSwap.push_back({ 16064, 28832, 3, 1, true });  // Thane Korth'azz: Mark of Korth'azz
         // Thane's Meteor 28884 (12825 fire split among everybody within 8 yd of a random player in 20 yd of him, every 12-15 s,
         // classic_boss_four_horsemen.cpp:684-695): his melee stack on him so it is shared.
         r.stayNear.push_back({ 16064, 8.0f, Who::Melee });
-        r.tankSwap.push_back({ 16065, 28833, 3 });  // Lady Blaumeux: Mark of Blaumeux
-        r.tankSwap.push_back({ 16063, 28835, 3 });  // Sir Zeliek: Mark of Zeliek
+        r.tankSwap.push_back({ 16065, 28833, 3, 1, true });  // Lady Blaumeux: Mark of Blaumeux
+        r.tankSwap.push_back({ 16063, 28835, 3, 1, true });  // Sir Zeliek: Mark of Zeliek
+        // Each horseman is held in his own corner of the room, where his tank takes him (the floor's corners, z 241.3, four steps below
+        // their dais at z 245.6: the end points of the horsemen's own walks in Northrend/Naxxramas/boss_four_horsemen.cpp, same map and
+        // room). naxx21 1116: all four were fought where they stood, 23-25 y from the raid at the door, and Zeliek's Holy Wrath, doubling
+        // with each jump (28883: 50 targets, amplitude 2.0), killed 17 in one cast 12 s in.
+        r.stand.push_back({ 16062, Who::Tank, 2584.32f, -2971.96f, 241.35f, 5.0f, true, 0 });   // Highlord Mograine
+        r.stand.push_back({ 16064, Who::Tank, 2542.70f, -3014.06f, 241.34f, 5.0f, true, 0 });   // Thane Korth'azz
+        r.stand.push_back({ 16065, Who::Tank, 2468.26f, -2947.50f, 241.28f, 5.0f, true, 0 });   // Lady Blaumeux
+        r.stand.push_back({ 16063, Who::Tank, 2517.64f, -2897.25f, 241.28f, 5.0f, true, 0 });   // Sir Zeliek
 
         // ---------------------------------------------------------------------------------------------------------------
         // PATCHWERK (16028): Hateful Strike hits the highest-health player in melee among his top four on threat, never the main
         // tank while others are in melee (naxx/classic_boss_patchwerk.cpp DoHatefulStrike). Three off tanks stay on him in melee.
         r.meleeSoak.push_back({ 16028, Who::OffTank, 3 });
+        // The soakers' armour is what Hateful Strike meets: a Greater Stoneshield Potion (+2000) on every tank when he is engaged, as a vanilla
+        // raid's tanks drank for him. naxx_patchwerk 1115b: T3 warriors at 9621 armour and 10759 health took 9-15k a strike and died to one.
+        r.resistPotion.push_back({ 16028, 13455, Who::Tank });
         // Hateful Strike is 22,100-29,900 before armour (vanilla data) on anybody within his melee reach, and his reach is long: the ranged
         // and the healers keep 18 yards off (naxx_patchwerk 2026-10-20: healers and mages 10-13 y from him took 14-28k each; 29 dead in 47 s).
         r.avoidEnemy.push_back({ 16028, 18.0f, Who::Ranged });
         r.avoidEnemy.push_back({ 16028, 18.0f, Who::Healer });
+        // Where he is fought: in his hall, the floor he walks (z 294.1, y -3217..-3247 from x 3248 to 3333, his spawn 3308.5,-3232.1),
+        // where everybody sees everybody. naxx-patch-grid (2026-11-15, [scenario_grid] round his spawn): the whole hall is level with him
+        // and in his sight; the floor south of it (y -3257..-3292) lies 2 y lower and out of his sight, and the one north 4 y higher and
+        // out of sight too. naxx_patchwerk 1114f and 1114g fought from that lower floor: 89 heals and shots failed for line of sight, the
+        // main tank went up into the hall alone and the healers followed it into his reach. His walk comes back east along y -3230 to his
+        // spawn, and he is met close to it (naxx_patchwerk 1115a: engaged at 3296,-3236 and fought at 3290-3311,-3232..-3249). The main
+        // tank holds him by his spawn at 3305,-3232.
+        // The ranged stand at the hall's east end with the healers, 4 y further east between their corners (3330,-3227 and 3330,-3237): 25 y
+        // from the main tank's post, past Hateful Strike's 18 y and inside every ranged spell's reach to him (30 y + his reach), and they
+        // wait there before the pull (NaxxPrePullPatchwerk). Their post was west of him at 3272,-3240, and from the lower floor the way up
+        // to it runs past him: in the 1115 threat run all 16 walked into his 18 y circle and out again for the whole fight, 0 damage in 90 s.
+        // The healers stand at the hall's east end in its two corners, 3326,-3223 and 3326,-3241: 20 y from his spawn and 23-26 y from him
+        // where the main tank holds him (west of its post, he comes from the west), and off his walk, so they wait there before the pull
+        // (NaxxPrePullPatchwerk) instead of walking 75 y from the lower floor after it (naxx_patchwerk 1115i: 29 of 61 s walking, no heal
+        // for 18 s, every tank dead). 1115a had them at that end 8-12 y from his spawn: they walked into his reach and Hateful Strike
+        // killed them; the corners keep the 18 y.
+        constexpr float kPatchHallZ = 294.1f;
+        r.stand.push_back({ 16028, Who::MainTank, 3305.0f, -3232.0f, kPatchHallZ, 5.0f, true, 0 });
+        r.stand.push_back({ 16028, Who::Ranged, 3330.0f, -3227.0f, kPatchHallZ, 4.0f, false, 0, 100.0f, 0.0f, 1 });
+        r.stand.push_back({ 16028, Who::Ranged, 3330.0f, -3237.0f, kPatchHallZ, 4.0f, false, 0, 100.0f, 0.0f, 2 });
+        r.stand.push_back({ 16028, Who::Healer, 3326.0f, -3223.0f, kPatchHallZ, 4.0f, false, 0, 100.0f, 0.0f, 1 });
+        r.stand.push_back({ 16028, Who::Healer, 3326.0f, -3241.0f, kPatchHallZ, 4.0f, false, 0, 100.0f, 0.0f, 2 });
+        // The posts are for a fight in his hall. Pulled anywhere else (Karrz 11-15 live: met at the hall's west end, 3210,-3190, on his
+        // walk), the healers ran 120 y off to the east corners and the ranged 80 y to theirs, nobody healed the soakers and every tank died
+        // to Hateful Strike in the first 30 s. Past 40 y from a post he is fought where he is, by the plain raid layout.
+        for (Stand& s : r.stand)
+            if (s.enemy == 16028)
+                s.maxFromEnemy = 40.0f;
 
         // ---------------------------------------------------------------------------------------------------------------
         // GROBBULUS (15931): Mutating Injection 28169 explodes into a poison cloud (creature 16363, triggers 28241 every
@@ -137,7 +211,16 @@ namespace Playerbot::Raid {
         r.carrierRun.push_back({ 28169, 15.0f, Who::NonTank });
         r.avoidCarrier.push_back({ 28169, 10.0f, Who::NonTank });
         r.avoidCreature.push_back({ 16363, 9.0f, Who::Anyone });
+        // The clouds last, and he stood in them: naxx21 the melee held off him for 61-63 of 90 s (raid:melee_hold, his centre inside a
+        // cloud's 9 y), 36% of his health in 90 s, and the tanks died at 88-104 s. His tank leads him out of them.
+        // A cloud's reach grows from 2 y to 20 y over its aura 28158 (classic_spell_grobbulus_cloud_poison); his tank leads him by that.
+        r.dragOut.push_back({ 15931, 16363, 11.0f, 28158, 2.0f, 20.0f });
         r.avoidFrontal.push_back({ 15931, 20.0f, 50.0f, Who::NonTank });
+        // Every player the spray hits leaves a Fallout Slime where it stands (classic_boss_grobbulus.cpp SpellHitTarget, one each), so
+        // the main tank is the only one in front of him: the off tanks keep the Fallout Slimes from his flank. naxx_grobbulus 1115a: all
+        // four tanks stood on him in front from 69 s, one spray at 160 s put six slimes on them at once, the four tanks died to the slimes
+        // in 11 s and the slimes then killed 30 of the raid.
+        r.avoidFrontal.push_back({ 15931, 20.0f, 50.0f, Who::OffTank });
         r.priority.push_back({ 16290, 3 });     // Fallout Slime
 
         // ---------------------------------------------------------------------------------------------------------------
@@ -145,8 +228,30 @@ namespace Playerbot::Raid {
         // Zombie Chows (16360) heal him when he eats them; Decimate leaves them at 5% for the AoE.
         r.tankSwap.push_back({ 15932, 25646, 5 });
         // Frenzy 28371: Tranquilizing Shot is the PvE coordinator's (PlanTranq, any aura the shot removes). Frenzy every 10 s: tranquilized (classic_boss_gluth.cpp:221-232)
-        // Zombie Chows heal him 5% each when he eats one within 15 yd (:290-312): they die before they reach him.
-        r.priority.push_back({ 16360, 5 });     // Zombie Chow
+        // Zombie Chows heal him 5% each when he eats one within 15 yd (:290-312). Each has 146,496 health (creaturestats, 1115e-b) against his
+        // 1,998,600: the raid does not burn them. The chow tanks hold them at their posts (RaidMechanics_Naxx.cpp, Gluth) until Decimate leaves
+        // every one at 5% and sends it walking to him; then they die first, before they reach him.
+        r.priority.push_back({ 16360, 5, Who::Anyone, 16360, 10.0f, 0.0f });   // Zombie Chow after Decimate
+        r.priority.push_back({ 16360, -1 });                                     // Zombie Chow: tanked, not killed
+        // Where: away from the chows' three spawns (ClassicGluthZombieSummonLoc, +-7 y: 3268,-3172 / 3253,-3132 / 3308,-3186, the room's west
+        // and south side). naxx-gluth-1115b [scenario_grid]: level floor from x 3233 to 3338 and y -3107 to -3207, the way in at the
+        // north-west (3253-3263,-3100). His body is 15 y wide and he hits from 17.7 y (1115e), so his tank does not lead him to a post:
+        // RaidMechanics_Naxx.cpp (Gluth) drags him to the east wall and puts his tank on the camp side of him, 30-40 y from the camp, and
+        // keeps the chow tanks at two posts by the spawns. naxx_gluth 1115e, with his tank on a north-east post 33 y from the camp: he stood
+        // 17 y short of it and 19 y from the camp, ate the chows the raid drew, and killed the camp once his tank fell (42 deaths, all his).
+        // The camp is on the north wall, 28 y from where the raid lands, within 43 y of the drag spot and 40 y of both chow posts (1115f's
+        // camp 3280,-3115 was 57 y from the drag spot, out of heal reach while his tank dragged him).
+        // naxx_gluth 1116 runs 9-11: with the camp on the north wall and him dragged along that wall to its east end, he stood 15-25 y from
+        // the camp, so every chow that went for a healer or a ranged walked past him (0111: eaten on Mchealpb/pc/pd/sd, 12-17 y from him at
+        // 100% health), 1.6-2.7M damage on him a run and 99% at the end. The camp is now south-west of his corner, between him and the
+        // spawns' side but short of the chow posts: a chow from any spawn reaches it from the south or west, and he stands 23-25 y on (his
+        // 15 y eat reach plus the camp's 6 y spread). 36 y from his tank in the corner, inside heal reach; 18 y from the south chow post.
+        constexpr float kGluthFloorZ = 297.8f;
+        // naxx_gluth 1116 run 18: his combat reach is 12 y, so he eats a chow up to 28.5 y from his centre, and he stood 22-26 y from the
+        // camp above: the chows that went for the camp were eaten there. The camp is now south of his corner along the east wall, 36 y from
+        // his tank and 33-38 y from where he stands (RaidMechanics_Naxx.cpp, kGluthCampX).
+        r.stand.push_back({ 15932, Who::Ranged, 3328.0f, -3150.0f, kGluthFloorZ, 6.0f, false, 0 });
+        r.stand.push_back({ 15932, Who::Healer, 3328.0f, -3150.0f, kGluthFloorZ, 6.0f, false, 0 });
 
         // ---------------------------------------------------------------------------------------------------------------
         // THADDIUS (15928): Polarity Shift gives Positive Charge 28059 / Negative Charge 28084 (naxx/classic_boss_thaddius.cpp).
@@ -158,16 +263,29 @@ namespace Playerbot::Raid {
         // his healers and the ranged on him stand 32 yards off (his tank is still within their 40).
         r.avoidEnemy.push_back({ 15930, 32.0f, Who::Ranged });
         r.avoidEnemy.push_back({ 15930, 32.0f, Who::Healer });
+        // Stalagg and Feugen go down together: each one fakes death at 1 hp for 5 s and stands up at full health unless the other is down
+        // too (classic_boss_thaddius.cpp fakeDeathTimer, HandleReviveEvent). naxx_thaddius 1114d: the raid took them one at a time,
+        // Stalagg 4% -> 99%, Feugen 9% -> 99%, five times over 600 s, and wiped. Damage is spread, neither more than 10% below the other.
+        // The finish: below 10% the lower one waits for the other to come within 2% (under 2 s of its side's damage), then both go down.
+        r.killTogether.push_back({ 15929, 0, 10.0f, { 15930 }, 10.0f, 2.0f });
 
         // ---------------------------------------------------------------------------------------------------------------
         // SAPPHIRON (15989): Life Drain 28542, Blizzard creatures 16474 that drift around (naxx/classic_boss_sapphiron.cpp),
         // Cleave / Tail Sweep front and back. Life Drain heals him for what it takes, so it goes before any other dispel.
         r.dispel.push_back({ 28542, DispelKind::Curse, true });
+        // Icebolt 28522 (air phase) freezes its target in an ice block for 25 s, the raid's cover from Frost Breath. The block goes when the
+        // stun does (spell_sapphiron_icebolt HandleRemove), so nobody removes it: no dispel, no Every Man for Himself, no Divine Shield.
+        r.noDispel.push_back(28522);
         // Frost Aura, Blizzard and Frost Breath: Greater Frost Protection for everyone.
         r.resistPotion.push_back({ 15989, 13456, Who::Anyone });
         r.avoidCreature.push_back({ 16474, 8.0f, Who::Anyone });
-        r.avoidFrontal.push_back({ 15989, 25.0f, 50.0f, Who::NonTank });
-        r.avoidFrontal.push_back({ 15989, 20.0f, 45.0f, Who::NonTank, 180.0f });   // Tail Sweep 15847 behind him
+        // Cleave 19983 is a chain of 10 (SpellEffect: ChainTargets 10), 5 y a jump for a melee spell (Spell::SearchChainTargets): from his
+        // tank to whoever stands within 5 y of the tank, and on. naxx22 1116: 9 healers cleaved 9-23 y from him, a chain through the camp
+        // behind his tank, which the old 50 degree cone left alone. His whole front half is kept clear to 30 y (his tank stands in it, at
+        // his reach; anyone within a jump of it is in it). Tail Sweep 15847 is Onyxia's spell (radius index 10, 30 y; 60 degrees each side
+        // of straight behind, RaidEncounters.h kOnyTailHalfDeg). The raid stands on his flanks between them, or beyond 30 y.
+        r.avoidFrontal.push_back({ 15989, 30.0f, 90.0f, Who::NonTank, 0.0f, 100.0f, 0.0f, true, 6.0f });
+        r.avoidFrontal.push_back({ 15989, 30.0f, kOnyTailHalfDeg, Who::NonTank, 180.0f, 100.0f, 0.0f, true, 6.0f });   // Tail Sweep behind him
 
         // ---------------------------------------------------------------------------------------------------------------
         // KEL'THUZAD (15990): Detonate Mana 27819 on a mana user (the carrier runs, others keep clear), Shadow Fissure 27810
@@ -186,9 +304,28 @@ namespace Playerbot::Raid {
         // the Soul Weavers and the Abominations (first matching row per bot wins, so the ranged row comes first).
         r.priority.push_back({ 16427, 6, Who::Ranged });
         r.priority.push_back({ 16427, 3 });     // Soldier of the Frozen Wastes
+        // No tank holds a Soldier: each one is sent at a random raider and blows up on arrival (classic_kt_p1AddAI, Dark Blast 28457), so
+        // the raid shoots them on the way in and the tanks keep the Abominations (naxx-kt-1114e: the tanks chased Soldiers 26-59 y out and
+        // the DPS held their damage waiting for them, 0 damage a second for 18 s).
+        r.noTank.push_back(16427);
         r.priority.push_back({ 16428, 2 });     // Unstoppable Abomination
-        // Soul Weaver: Wail of Souls 28459, damage and a knockback in front of it within 30 yd (vanilla data, radius index 10).
-        r.avoidFrontal.push_back({ 16429, 30.0f, 60.0f, Who::NonTank });
+        // The seven alcoves are out of bounds (naxx-kt-1114d: the tanks met the first Soldier at the south alcove, 3704,-5170, pulled its
+        // 3 Abominations and its Soul Weaver and the raid died in 18 s). Each alcove keeps 10 Soldiers wandering within 14 y of its
+        // centre, 3 Abominations and a Soul Weaver (classic_boss_kelthuzad.cpp:518-556); they wake for anyone within their own aggro
+        // range (about 13-15 y) and 30 y 2D (classic_kt_p1AddAI). 30 y round each centre covers both; the centres lie 61-65 y from Kel'Thuzad,
+        // so the middle keeps about 31 y of room, where the raid fights the adds the script sends at it. The static adds stay up
+        // through phase 2, so the circles hold on Kel'Thuzad too: in phase 1 he is not in the raid's combat (immune), the sent
+        // Soldiers are.
+        for (auto const& alcove : { std::pair{ 3768.40f, -5072.00f }, { 3729.30f, -5044.10f }, { 3683.00f, -5054.05f }, { 3654.15f, -5093.48f },
+                                    { 3664.55f, -5140.50f }, { 3704.00f, -5170.00f }, { 3751.95f, -5158.90f } })
+        {
+            r.keepOut.push_back({ 16427, alcove.first, alcove.second, 30.0f });
+            r.keepOut.push_back({ 15990, alcove.first, alcove.second, 30.0f });
+        }
+        // Soul Weaver: Wail of Souls 28459, damage and a knockback in front of it. This build's spell data gives it a 32 y radius
+        // ([bot_death] spell_data radius=32), not the vanilla 30: naxx_kelthuzad af52 sweep 1 killed a healer standing 30.7 y from the
+        // Weaver. 34 y and a 10 degree margin: a Weaver loose on the raid turns from one victim to the next and casts as it turns.
+        r.avoidFrontal.push_back({ 16429, 34.0f, 60.0f, Who::NonTank, 0.0f, 100.0f, 0.0f, true, 10.0f });
         // Shackle at most 3 Guardians: a 4th frees them all (classic_boss_kelthuzad.cpp:1027-1100).
         r.crowdControl.push_back({ 16441, CcKind::Shackle, 0, 3 });
         // A Guardian that is tanked stacks Blood Tap 28470 on its tank (+damage, +size per stack, classic_boss_kelthuzad.cpp:104):
@@ -269,7 +406,7 @@ namespace Playerbot::Raid {
         //    sides above all resolve to one side; harmless. Magnetic Pull tank swap of Stalagg/Feugen relies on pvecoord.
         //  * Noth's balcony phase (immune 29230, adds) and blink: the generic tank pickup handles both.
         //  * Kel'Thuzad: Frost Blast 27808 (heal through).
-        //  * Loatheb Inevitable Doom 29204 (heal through); Anub'Rekhan Impale (random line, nothing to dodge in time).
+        //  * Loatheb Inevitable Doom 29204 (heal through; a bot the tick would kill uses its health item, Classic::PickCombatHealthItem); Anub'Rekhan Impale (random line, nothing to dodge in time).
         //  * Trash: Plague Slime 16243 changes school immunity with its colour (needs the casters' rotations to pick a school);
         //    Plague Beast 16034 Mutated Spores (radius not in the spell data); Gargoyle Stoneskin needs an interrupt (pvecoord).
     }

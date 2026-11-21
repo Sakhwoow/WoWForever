@@ -45,9 +45,9 @@
 #include "../../Travel/QuestHubDatabase.h"
 #include "../ChannelTalk.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
-#include <algorithm>
 #include <deque>
 #include <string>
 #include <vector>
@@ -285,11 +285,13 @@ std::vector<ResolvedTown> const& VanillaTowns()
         std::vector<ResolvedTown> out;
         LocaleConstant const locale = ::World::instance()->GetDefaultDbcLocale();   // sWorld would resolve to this namespace
         std::string missing;
+        uint32 wanted = 0;
         for (VanillaTown const& t : kVanillaTowns)
         {
             for (bool side : { true, false })
             {
                 if (side ? !t.alliance : !t.horde) continue;
+                ++wanted;
                 TaxiNodesEntry const* found = nullptr;
                 for (TaxiNodesEntry const* node : sTaxiNodesStore)
                 {
@@ -307,38 +309,41 @@ std::vector<ResolvedTown> const& VanillaTowns()
                 out.push_back({ &t, side, found->Pos.X, found->Pos.Y, found->Pos.Z, found->Facing });
             }
         }
-        // Fallback for data without English names (the server holds the extracted locale only, e.g. ruRU, so no name above matches):
-        // every flight point on the two continents that stands in a vanilla leveling zone (1.12 level range above 10, not a
-        // capital) is a town of that zone, found by the zone id of its position. The names stay as the data has them.
-        static std::deque<VanillaTown> synthTowns;
-        static std::deque<std::string> synthNames;
-        uint32 synthCount = 0;
-        for (TaxiNodesEntry const* node : sTaxiNodesStore)
+        // Client data in another language only (a server that extracted ruRU, say): none of the English names above match, the town list
+        // came out (nearly) empty and the bots had no levelling towns to be sent to. Then every flight point on the two continents that
+        // stands in a vanilla levelling zone (1.12 range above level 10, not a capital) is a town of that zone, found by the zone of its
+        // position; its name stays as the data has it. Only when most named rows were not found, so a realm with English data keeps
+        // exactly the list above. Thanks to PlayDargoon (Sakhwoow/WoWForever eb1d92afb), whose fix this follows.
+        uint32 by_zone = 0;
+        if (out.size() * 2 < wanted)
         {
-            if (!node || (node->ContinentID != 0 && node->ContinentID != 1)) continue;
-            bool const toAlliance = NodeShownTo(node, true);
-            bool const toHorde = NodeShownTo(node, false);
-            if (!toAlliance && !toHorde) continue;
-            uint32 const zone = sTerrainMgr.GetZoneId(PhasingHandler::GetEmptyPhaseShift(), node->ContinentID, node->Pos.X, node->Pos.Y, node->Pos.Z);
-            uint8 lo = 0, hi = 0;
-            if (!VanillaZoneLevelRange(zone, lo, hi) || hi <= 10 || IsVanillaCapitalZone(zone)) continue;
-            // a node that a named row above already resolved is not added a second time
-            bool dup = false;
-            for (ResolvedTown const& r : out)
-                if (r.x == node->Pos.X && r.y == node->Pos.Y && r.town->map == node->ContinentID) { dup = true; break; }
-            if (dup) continue;
-            synthNames.emplace_back(node->Name[locale] && *node->Name[locale] ? node->Name[locale] : "taxi node");
-            synthTowns.push_back({ synthNames.back().c_str(), uint16(node->ContinentID), uint8(std::max<uint8>(lo, 10)), hi, toAlliance, toHorde });
-            VanillaTown const* st = &synthTowns.back();
-            for (bool side : { true, false })
+            static std::deque<VanillaTown> zone_towns;   // the rows must outlive this list: ResolvedTown points at them
+            static std::deque<std::string> zone_names;
+            for (TaxiNodesEntry const* node : sTaxiNodesStore)
             {
-                if (side ? !toAlliance : !toHorde) continue;
-                out.push_back({ st, side, node->Pos.X, node->Pos.Y, node->Pos.Z, node->Facing });
-                ++synthCount;
+                if (!node || (node->ContinentID != 0 && node->ContinentID != 1)) continue;
+                bool const to_alliance = NodeShownTo(node, true);
+                bool const to_horde = NodeShownTo(node, false);
+                if (!to_alliance && !to_horde) continue;
+                uint32 const zone = sTerrainMgr.GetZoneId(PhasingHandler::GetEmptyPhaseShift(), node->ContinentID, node->Pos.X, node->Pos.Y, node->Pos.Z);
+                uint8 lo = 0, hi = 0;
+                if (!VanillaZoneLevelRange(zone, lo, hi) || hi <= 10 || IsVanillaCapitalZone(zone)) continue;
+                bool const known = std::any_of(out.begin(), out.end(), [&](ResolvedTown const& r)
+                    { return r.town->map == node->ContinentID && r.x == node->Pos.X && r.y == node->Pos.Y; });
+                if (known) continue;   // a named row above already has this node
+                zone_names.emplace_back(node->Name[locale] && *node->Name[locale] ? node->Name[locale] : "flight point");
+                zone_towns.push_back({ zone_names.back().c_str(), uint16(node->ContinentID), std::max<uint8>(lo, 10), hi, to_alliance, to_horde });
+                VanillaTown const* town = &zone_towns.back();
+                for (bool side : { true, false })
+                {
+                    if (side ? !to_alliance : !to_horde) continue;
+                    out.push_back({ town, side, node->Pos.X, node->Pos.Y, node->Pos.Z, node->Facing });
+                    ++by_zone;
+                }
             }
         }
-        TC_LOG_INFO("playerbot.v2", "[ZonePicker] Classic: {} vanilla town flight points resolved ({} of them found by zone){}{}",
-            uint32(out.size()), synthCount, missing.empty() ? "" : "; named rows not in TaxiNodes: ", missing);
+        TC_LOG_INFO("playerbot.v2", "[ZonePicker] Classic: {} vanilla town flight points resolved ({} found by zone){}{}",
+            uint32(out.size()), by_zone, missing.empty() ? "" : "; named rows not in TaxiNodes: ", missing);
         return out;
     }();
     return towns;
@@ -602,6 +607,11 @@ bool FindGrindSpotNear(bool alliance, uint32 map, float x, float y, uint32 level
         return false;
     ox = gs[best].x; oy = gs[best].y; oz = gs[best].z;
     return true;
+}
+
+uint32 GrindMobsNear(bool alliance, uint32 map, float x, float y, uint32 level, float radius)
+{
+    return MobSupplyNear(GrindSpotsFor(alliance), map, x, y, level, radius);
 }
 
 DestinationPick SpreadWithinZone(DestinationPick d, uint8 level, bool alliance, uint64 seed, bool allow_grind)

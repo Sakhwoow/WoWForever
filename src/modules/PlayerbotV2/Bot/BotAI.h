@@ -5,6 +5,7 @@
 
 #pragma once
 #include "ClassicBuffLedger.h"
+#include "ResistGear.h"   // KeepFightCloak (gear_slot_held)
 
 #include "IdleWatch.h"
 #include "Dungeon/TankStill.h"
@@ -483,6 +484,17 @@ public:
     // equip-upgrade rule leaves the worn pieces alone, as for the resistance gear.
     bool   fight_cloak() const { return fight_cloak_; }
     void   set_fight_cloak(bool v) { fight_cloak_ = v; }
+    // Whether an equip rule must leave this equipment slot alone: every slot while the resistance gear is on, the back slot while the
+    // Onyxia Scale Cloak is. The own piece in the bags scores higher than the worn swap piece, so any score-based equip rule would put
+    // it straight back on (dev realm 2026-11-13: idle:dungeon_auto_equip took the cloak off again within seconds, and the raid pulled
+    // Nefarian in its own cloaks). The worn Onyxia Scale Cloak in Blackwing Lair is held whoever put it on (Classic::KeepFightCloak): a
+    // bot with no owner never runs the cloak rule, and a scenario raid's cloak (ScenarioDef::wear_entry) came off the same way
+    // (bwl_nefarian 2026-11-14: Mchealpa and Mcmaged died of the 22682 burn, with no "wears the Onyxia Scale Cloak" line from Shadow Flame).
+    bool   gear_slot_held(uint8 slot, uint32 map_id, uint32 worn_entry) const
+    {
+        return resist_gear_school_ != 0 ||
+               (slot == 14 /*EQUIPMENT_SLOT_BACK*/ && (fight_cloak_ || ::Playerbot::Classic::KeepFightCloak(map_id, worn_entry)));
+    }
 
     // Mailbox-open hesitation slot.
     uint32 pending_mail_open_at_ms() const { return pending_mail_open_at_ms_; }
@@ -640,6 +652,12 @@ public:
         use_stay_.store(false, std::memory_order_relaxed);   // any new order replaces the use's Stay
         stay_return_set_.store(false, std::memory_order_relaxed);   // and the spot an old Stay walks back to
         stay_return_pinned_.store(false, std::memory_order_relaxed);
+        // The owner's Attack on a target is the "the condition may have cleared" retry the start_attack lockout waits 30 s for: an
+        // earlier refusal on the same mob (refused while mounted, before the bot came in sight of it) left the engage rules dropping
+        // every StartAttack on it after the order's own one, so a bot that lost its swing in the first seconds stood and watched
+        // (Discord 6_1_8_8_1: grouped bots "sometimes do not attack after using the Attack command" in the open world).
+        if (cmd == OwnerCommand::Engage)
+            forgive_start_attack(target.GetCounter(), now_ms);
     }
     // The Stay a "use <object>" leaves after the use: ends once the use is done (no channel 5 s after it, idle:owner_stay), when the
     // bot's or the group's fight starts (DispatchInCombat, idle:owner_stay), a two-minute backstop otherwise.
@@ -845,6 +863,39 @@ public:
     // out of a dungeon run: those stay out while the owner leads with a follow order too.
     bool           dungeon_run_engaged() const { return dungeon_run_mode_ == DungeonRunMode::Active; }
 
+    // "Tank leads" (the owner's "lead on|pause|off", `.bot lead`, the ForeverBots Lead button): in a 5-man dungeon a human in the
+    // group normally leads and the bots follow him (human_lead_hold). With the lead on, the bot tank leads instead, as in a group of
+    // bots alone: it walks the route, pulls pack by pack and goes boss to boss, and the player follows. It still waits for the
+    // healer's and the casters' mana (PullManaGate), for the dead, and for the player when he is dead, outside or over
+    // kTankLeadPlayerHoldYd away. Paused: the lead stays with the tank, which starts no new pull and walks no further until "lead on".
+    // In a raid group on a raid map the main tank leads the trash the same way, but stops before each boss: it stands where it would
+    // pull from and waits until the player pulls himself or says "go" (tank_lead_boss_wait / tank_lead_boss_go; Karrz 2026-11-14).
+    // Ends on its own when the bot leaves the dungeon (update_dungeon_autopilot_hold). Every bot of the group holds it: the tank
+    // leads, the rest stay on the tank and fight its pulls. Written by the chat handler (world thread), read by the bot worker.
+    enum class TankLead : uint8 { Off = 0, On = 1, Paused = 2 };
+    static constexpr float kTankLeadPlayerHoldYd = 60.0f;
+    static constexpr uint32 kTankLeadLeaveMs = 10000;   // outside the dungeon this long (not a loading-screen blink): the lead ends
+    TankLead tank_lead() const { return TankLead(tank_lead_.load(std::memory_order_relaxed)); }
+    // Returns true when the value changed.
+    bool set_tank_lead(TankLead m) { return tank_lead_.exchange(uint8(m), std::memory_order_relaxed) != uint8(m); }
+    bool tank_lead_engaged() const { return tank_lead() != TankLead::Off; }
+    // The bot is in a 5-man dungeon, or in a raid group on a raid map, with the lead on (or paused): the human hold, the human-led
+    // passivity and the human-led mana exemption do not apply. A party that is not a raid group on a raid map is not led
+    // (raid_map_party_hold keeps it on its owner).
+    bool tank_leads_here(BotSnapshotView const& s) const;
+    // Raid lead, the boss stop: the entry of the boss the leading tank stands before (0: none), written by the tank's worker and read by
+    // the chat handler, which answers "go" with the pull; and the entry the player said "go" for, which lets that one pull through.
+    // Both are cleared once the boss fight starts, so a wipe stops again at the same boss.
+    uint32 tank_lead_boss_wait() const { return tank_lead_boss_wait_.load(std::memory_order_relaxed); }
+    void   set_tank_lead_boss_wait(uint32 entry) { tank_lead_boss_wait_.store(entry, std::memory_order_relaxed); }
+    uint32 tank_lead_boss_go() const { return tank_lead_boss_go_.load(std::memory_order_relaxed); }
+    void   set_tank_lead_boss_go(uint32 entry) { tank_lead_boss_go_.store(entry, std::memory_order_relaxed); }
+    // The reason the leading tank last told the group it waits ("mana", "you", ...) and when, so it says it once per hold
+    // (States: the advance gate). Bot worker only.
+    char const* tank_lead_said() const { return tank_lead_said_; }
+    uint32      tank_lead_said_ms() const { return tank_lead_said_ms_; }
+    void        note_tank_lead_said(char const* why, uint32 now_ms) { tank_lead_said_ = why; tank_lead_said_ms_ = now_ms; }
+
     // Owner "follow" order: the owner leads, so the bot follows its owner and defends, and the
     // dungeon autopilot stands down until the owner says attack / assist / tank / pull / resume /
     // run (or follow stop), or engages a mob himself. Unlike the 30s manual-mode window it lasts
@@ -857,7 +908,11 @@ public:
     // follow the owner and defend. Recomputed each tick (update_dungeon_autopilot_hold).
     bool raid_map_party_hold() const { return raid_map_party_hold_; }
     bool dungeon_autopilot_suspended() const
-    { return owner_follow_order() || owner_passive() || fallback_active() || pull_back_active() || raid_map_party_hold_ || human_lead_hold_ || owner_hold_; }
+    { return owner_follow_order() || (owner_passive() && !defensive_tank_lead()) || fallback_active() || pull_back_active() || raid_map_party_hold_ ||
+             human_lead_hold_ || owner_hold_; }
+    // The owner's Defensive stance (OwnerStance::Passive, the ForeverBots start setting) while the tank leads the dungeon: the lead is
+    // his order to go, so the autopilot runs and the bots fight the tank's pulls. The full Passive (NoFight) still stops everything.
+    bool defensive_tank_lead() const { return tank_leads_now_ && owner_stance() == OwnerStance::Passive; }
     // Owner stance (panel Aggressive / Passive toggle, whisper and group words "passive" / "aggressive"), kept per bot until
     // changed (the group order reaches every bot of the group):
     //   Auto       - passive when a human leads the group inside an instance, otherwise the bot's own autonomy;
@@ -892,6 +947,7 @@ public:
     {
         if (owner_no_fight()) return true;   // no order window opens the full Passive
         if (owner_order_window_open()) return false;
+        if (tank_leads_now_) return false;   // "lead on": the tank's pulls are the group's fights (Defensive and Auto alike)
         OwnerStance const st = owner_stance();
         return st == OwnerStance::Passive || (st == OwnerStance::Auto && human_led_instance);
     }
@@ -1031,7 +1087,8 @@ public:
     // Owner "use <object>" (BotCommandParser): walk to this game object and use it once (an altar, brazier, lever, orb); the
     // bot then stays put, so a ritual's channel is not broken by a follow. Written by the chat handler (world thread), run by
     // the bot worker (idle:owner_use); same mutex as the fallback. Ends on use, death, map change or after 30 s.
-    struct OwnerUseOrder { bool set = false; uint32 map = 0; ObjectGuid go; float x = 0.f, y = 0.f, z = 0.f; uint32 set_ms = 0; };
+    // ritual: taken by idle:ritual_join, not ordered - used only while the snapshot still picks this bot, and no Stay after it.
+    struct OwnerUseOrder { bool set = false; uint32 map = 0; ObjectGuid go; float x = 0.f, y = 0.f, z = 0.f; uint32 set_ms = 0; bool ritual = false; };
     bool owner_use_active() const { return owner_use_active_.load(std::memory_order_relaxed); }
     OwnerUseOrder owner_use_order() const
     { std::lock_guard<std::mutex> lk(fallback_mtx_); return owner_use_; }
@@ -1669,6 +1726,42 @@ public:
         }
     }
 
+    // ---- boss-stride headway (2026-11-19) ----
+    // The tank's direct stride toward a boss holds its step while the bot is moving with that step as its spline's end
+    // (DungeonStepAlreadyInFlight) and re-emits it whenever the spline ends, so a step the bot can never reach is walked at
+    // forever as long as the bot keeps moving: drowned_full af47-1, the stride from Var'Taka to Captain Dreadrise pointed
+    // into a pit at (-13610.7,2775.3,-37.0); the tank ran down and back up the slope beside it every 7 s for 29 minutes
+    // (1,700 s, z -29 to -37) and the group stood idle below. This tracks the bot's best distance to the step it strides
+    // at; no headway for kStrideStallMs means the step is a dead end.
+    static constexpr float  kStrideSameStepY = 5.0f;    // two steps this close are the same step (the start point moves)
+    static constexpr float  kStrideHeadwayY  = 1.5f;    // the best distance must shrink by this much to count
+    static constexpr uint32 kStrideStallMs   = 8000;
+    static constexpr uint32 kStrideGapMs     = 2000;    // not striding for this long starts the watch afresh
+    // Returns how long the bot has gone without headway on this step (0 while it closes in).
+    uint32 stride_note(uint32 map_id, float sx, float sy, float sz, float bx, float by, float bz, uint32 now_ms)
+    {
+        float const ddx = sx - stride_x_, ddy = sy - stride_y_, ddz = sz - stride_z_;
+        float const d = std::sqrt((bx - sx) * (bx - sx) + (by - sy) * (by - sy) + (bz - sz) * (bz - sz));
+        bool const same = stride_map_ == map_id && stride_seen_ms_ && now_ms - stride_seen_ms_ < kStrideGapMs &&
+                          ddx * ddx + ddy * ddy + ddz * ddz <= kStrideSameStepY * kStrideSameStepY;
+        stride_seen_ms_ = now_ms ? now_ms : 1u;
+        if (!same)
+        {
+            stride_map_ = map_id;
+            stride_x_ = sx; stride_y_ = sy; stride_z_ = sz;
+            stride_best_ = d;
+            stride_best_ms_ = stride_seen_ms_;
+            return 0;
+        }
+        if (stride_best_ - d > kStrideHeadwayY)
+        {
+            stride_best_ = d;
+            stride_best_ms_ = stride_seen_ms_;
+        }
+        return now_ms - stride_best_ms_;
+    }
+    float stride_best() const { return stride_best_; }
+
     // ---- refused-destination memory (refusal-aware target selection,
     // 2026-07-20) ----
     // BUG THIS FIXES: PlayerbotAPI::move_to keeps a PER-DESTINATION path-fail
@@ -1697,6 +1790,12 @@ public:
     {
         move_refused_[move_refused_head_] = RefusedDst{x, y, z, now_ms ? now_ms : 1u};
         move_refused_head_ = (move_refused_head_ + 1) % move_refused_.size();
+    }
+    // Forget every refusal: the geometry that refused them changed (the bot opened a door across its route).
+    void clear_move_refusals()
+    {
+        move_refused_.fill(RefusedDst{});
+        move_refused_head_ = 0;
     }
     bool move_refused_recently(float x, float y, float z, uint32 now_ms) const
     {
@@ -2760,6 +2859,13 @@ public:
         AlwaysBuff      = 58,  // target = kAlwaysBuffLockKey. idle:always_buff (Playerbot.AlwaysBuffs): 10s between passes.
         BgCaptureHold   = 59,  // target = the node key of BgTryUseObjectiveGo. A bot that started a banner capture stands still at the
                                // banner for 7s, so the 5s channel completes on its next click instead of being broken by another rule's move.
+        DungeonHandDoor = 60,  // target = door GO guid_low. idle:dungeon_open_hand_door: one click per shut hand door per 5 s; a door
+                               // that opened leaves the snapshot's hand doors, one still shut is clicked again (see the lockout below).
+        DungeonPortalHop = 61, // target = the portal's GO entry. idle:dungeon_portal_hop: a bot that used a dungeon's own portal to
+                               // the next boss room waits 8s before it uses it again (the teleport lands it out of range at once; a
+                               // portal that refused, its bosses not all dead yet, is not clicked every tick).
+        DungeonDoorTalk = 62,  // target = the creature's entry. idle:dungeon_door_talk: the tank told a dungeon's door opener
+                               // (advice.door_talks: Ironbark the Redeemed) to open the way: not again for the 5 min default.
     };
     static constexpr uint32 kActionRetryLockoutMs = 5u * 60u * 1000u;
     // Per-kind cooldown override — most actions use the 5 min default, but
@@ -2891,6 +2997,8 @@ public:
             case ActionKind::BgFormHold:
                 // Past the 3 s BgUseGo retry, so the second click lands out of form.
                 return 6u * 1000u;
+            case ActionKind::DungeonPortalHop:
+                return 8u * 1000u;
             case ActionKind::BgCaptureHold:
                 // The 5 s capture channel plus the 3 s click that completes it, less the click already made at its start.
                 return 7u * 1000u;
@@ -2956,6 +3064,12 @@ public:
                 // recovers the critical_repair gate stops firing entirely, so a
                 // no-op RepairAll on already-full gear never spams.
                 return 5u * 1000u;
+            case ActionKind::DungeonHandDoor:
+                // 5 s, not the 5 min default: the click has no feedback to the rule, and a door the click did not open stays shut
+                // across the tank's path for the whole group (deadmines_full af39 19 Nov: one click on the second Heavy Door, the door
+                // still shut 60 s later, the run stalled at 120 s). An opened door is no longer a hand door in the snapshot, so the
+                // retry ends the moment the door opens.
+                return 5u * 1000u;
             default:
                 return kActionRetryLockoutMs;
         }
@@ -3020,11 +3134,39 @@ public:
         return now_ms < it->second;
     }
     // Raid buffs this bot cast itself (ClassicBuffLedger.h): a buff the group snapshot cannot see is not recast for a part of its length.
-    void note_buff_cast(uint64 key, uint32 now_ms) { buff_cast_ms_[key] = now_ms ? now_ms : 1u; }
+    // `spell` and `target` are what the intent asked for, so a refusal of that cast (note_cast_refused) takes the trust back.
+    void note_buff_cast(uint64 key, uint32 now_ms, uint32 spell = 0, ObjectGuid target = ObjectGuid::Empty)
+    {
+        buff_cast_ms_[key] = BuffCastNote{ now_ms ? now_ms : 1u, spell, target.GetCounter() };
+    }
+    // How the core answered the cast noted for `key`: not refused, refused for a passing reason (the global cooldown, another cast
+    // still running: try again now), or refused for good (range, line of sight: the 30 s retry lockout stands, the trust does not).
+    enum class BuffCastRefusal : uint8 { None, Passing, Lasting };
+    BuffCastRefusal buff_cast_refusal(uint64 key) const
+    {
+        auto const it = buff_cast_ms_.find(key);
+        if (it == buff_cast_ms_.end() || !it->second.spell)
+            return BuffCastRefusal::None;
+        std::lock_guard<std::mutex> lk(cast_refused_mtx_);
+        for (CastRefusedNote const& r : cast_refused_)
+            if (r.spell == it->second.spell && r.target == it->second.target && Classic::CastRefusedAfter(it->second.ms, r.ms))
+                return r.passing ? BuffCastRefusal::Passing : BuffCastRefusal::Lasting;
+        return BuffCastRefusal::None;
+    }
     bool buff_cast_trusted(uint64 key, uint32 now_ms) const
     {
         auto const it = buff_cast_ms_.find(key);
-        return it != buff_cast_ms_.end() && Classic::BuffCastTrusted(key, it->second, now_ms);
+        return it != buff_cast_ms_.end() && Classic::BuffCastTrusted(key, it->second.ms, now_ms)
+            && buff_cast_refusal(key) == BuffCastRefusal::None;
+    }
+    // World thread (BotIntentExecutor): the core refused a cast intent. Kept in a small ring the rule thread reads under the mutex.
+    void note_cast_refused(uint32 spell, ObjectGuid target, uint32 now_ms, bool passing)
+    {
+        if (!spell)
+            return;
+        std::lock_guard<std::mutex> lk(cast_refused_mtx_);
+        cast_refused_[cast_refused_next_] = CastRefusedNote{ now_ms ? now_ms : 1u, spell, target.GetCounter(), passing };
+        cast_refused_next_ = uint8((cast_refused_next_ + 1) % cast_refused_.size());
     }
     void prune_action_retry_cache(uint32 now_ms)
     {
@@ -3309,6 +3451,7 @@ private:
     // engages a mob himself. Runs every tick before the state dispatch.
     void update_dungeon_autopilot_hold(BotSnapshotView, GroupSnapshotView);
     void update_group_fight(BotSnapshotView, GroupSnapshotView);
+    void dispatch_state(BotSnapshotView s, GroupSnapshotView g, BotIntentEmitter& em);
 
     BotId          bot_id_;
     BotPersonality personality_;
@@ -3326,6 +3469,11 @@ private:
     uint32         rule_fire_seq_ = 0;
 public:
     uint32         rule_fire_seq() const { return rule_fire_seq_; }
+    // [attack_rule]: the target of an [attack_start] line logged during this tick's dispatch, and the rule count then. The line names
+    // the rule that fired BEFORE the attack; dispatch_primary names the one that started it once the tick is done.
+    void note_attack_start_logged(ObjectGuid target) { attack_log_target_ = target; attack_log_seq_ = rule_fire_seq_; }
+    ObjectGuid     attack_log_target_;
+    uint32         attack_log_seq_ = 0;
 
     // [dps_idle] tracker (bot worker; State_InCombat's end-of-tick probe).
     // idle_since = first tick of the current no-action streak (0 = acting),
@@ -3633,6 +3781,14 @@ private:
     bool           owner_hold_            = false;   // an owner Stay / Hold is on: the autopilot walks nobody (update_dungeon_autopilot_hold)
     bool           human_lead_hold_       = false;   // see human_lead_hold()
     uint32         human_seen_ms_         = 0;       // last tick a leading human was in range (0 = never)
+    std::atomic<uint8> tank_lead_{0};                // TankLead
+    std::atomic<uint32> tank_lead_boss_wait_{0};     // see tank_lead_boss_wait()
+    std::atomic<uint32> tank_lead_boss_go_{0};       // see tank_lead_boss_go()
+    uint32         tank_lead_inside_ms_   = 0;       // last tick inside a 5-man dungeon while the lead was on (0 = not yet)
+    uint32         tank_lead_away_ms_     = 0;       // first tick outside it since (0 = inside); the lead ends after kTankLeadLeaveMs
+    char const*    tank_lead_said_        = nullptr; // see tank_lead_said()
+    bool           tank_leads_now_        = false;   // tank_leads_here() as of this tick (update_dungeon_autopilot_hold); bot worker
+    uint32         tank_lead_said_ms_     = 0;
     BgRunMode      bg_run_mode_           = BgRunMode::Off;
     // Edge-tracker for BG entry/exit. Auto-activate fires on the
     // false→true transition of `in_battleground()`, not while the bot
@@ -4033,6 +4189,11 @@ private:
     // progress_ms_ = the timestamp that best distance was last improved.
     // See move_commit_note_progress()/move_commit_active() above.
     float          move_commit_best_d2_     = 0.f;
+    uint32         stride_map_              = 0;      // boss-stride headway (stride_note)
+    float          stride_x_ = 0.f, stride_y_ = 0.f, stride_z_ = 0.f;
+    float          stride_best_             = 0.f;
+    uint32         stride_best_ms_          = 0;
+    uint32         stride_seen_ms_          = 0;
     uint32         move_commit_progress_ms_ = 0;
     // Refused-destination ring (see move_refused_recently() above).
     struct RefusedDst { float x = 0.f, y = 0.f, z = 0.f; uint32 ms = 0; };
@@ -5117,7 +5278,12 @@ private:
     std::unordered_map<uint64, uint32> chest_loot_until_ms_;
     // Generic action retry cooldown — see ActionKind / kActionRetryLockoutMs.
     std::unordered_map<uint64, uint32> action_retry_until_ms_;
-    std::unordered_map<uint64, uint32> buff_cast_ms_;   // note_buff_cast
+    struct BuffCastNote { uint32 ms = 0; uint32 spell = 0; uint64 target = 0; };
+    std::unordered_map<uint64, BuffCastNote> buff_cast_ms_;   // note_buff_cast (rule thread)
+    struct CastRefusedNote { uint32 ms = 0; uint32 spell = 0; uint64 target = 0; bool passing = false; };
+    mutable std::mutex cast_refused_mtx_;                     // note_cast_refused (world thread) / buff_cast_refusal (rule thread)
+    std::array<CastRefusedNote, 16> cast_refused_{};
+    uint8 cast_refused_next_ = 0;
     // #4B-1 Part 2: per-item AH sell-price memory — see SellPriceMemo above.
     // Keyed by item_entry. Bounded naturally by the bot's distinct sellable
     // inventory; the AhPostItem 5-min retry lockout limits churn so this map
@@ -5245,6 +5411,15 @@ public:
     {
         if (target_low == 0) return;
         start_attack_until_ms_[target_low] = now_ms + kStartAttackLockoutMs;
+    }
+    // Ends a lockout early (the owner ordered the attack). The entry is expired in place, not erased: the map is written on the world
+    // thread and read by the bot worker, and an in-place store changes no bucket under a reader.
+    void forgive_start_attack(uint64 target_low, uint32 now_ms)
+    {
+        if (target_low == 0) return;
+        auto const it = start_attack_until_ms_.find(target_low);
+        if (it != start_attack_until_ms_.end() && it->second > now_ms)
+            it->second = now_ms;
     }
     bool start_attack_recently_refused(uint64 target_low, uint32 now_ms) const
     {

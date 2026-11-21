@@ -32,6 +32,10 @@ namespace Playerbot::Raid {
         // Conflagration is a cone: vanilla data gives 23023 the front-cone target (24) with a 30 yd radius, so everybody but the tank
         // stays out of the sector in front of him (the tank takes it and hands him over, above).
         r.avoidFrontal.push_back({ 12435, 30.0f, 50.0f, Who::NonTank });
+        // A raider carrying Conflagration burns everyone next to it (16806, 300 fire a tick, cast by the carrier) while it is
+        // disoriented and wanders. bwl_razorgore af53: three melee killed each other this way in a row (0.6-5.2 y apart), and
+        // the tanks took 12-17k from it. Everybody but the tanks keeps 8 y off a carrier until it burns out.
+        r.avoidCarrier.push_back({ 23023, 8.0f, Who::NonTank });
         // War Stomp 24375 (classic_boss_razorgore.cpp:49), the same stun as the Wyrmguard's below: casters and healers keep 18 yards
         // (in phase 1 that also keeps them off the possessed Razorgore).
         r.avoidEnemy.push_back({ 12435, 18.0f, Who::Ranged });
@@ -149,6 +153,9 @@ namespace Playerbot::Raid {
         r.priority.push_back({ 11583, 3 });                                       // the boss must beat the constructs (boss_nefarian.cpp:371-376)
         // Bone Constructs (phase 3): 6k hp each, up to 42. Every second caster clears them with area
         // damage (first matching row wins, so this one comes first); everybody else stays on Nefarian while the tanks hold them.
+        // Every caster (Who::Caster) was tried and is worse: bwl_nefarian 1114j, 9 constructs loose 3 s after the rise and 23 at 6 s
+        // (the half split: 0-6), the casters' area threat pulled them off the spare tanks into the casters and healers, Nefarian
+        // stalled at 12-14% with only melee and hunters on him, and the raid wiped. The half split passed (1114e, kill 2026-11-14).
         r.priority.push_back({ 14605, 8, Who::AoeShare });
         r.priority.push_back({ 14605, 0 });                                       // Bone Construct: up to 40 of them, 6k hp each; tanks hold them, DPS burn Nefarian (DB 14605)
         r.priority.push_back({ 14668, 6 });                                       // Corrupted Infernal (warlock call: 2 per warlock, stun+damage) (boss_nefarian.cpp:63,609-624)

@@ -24,8 +24,10 @@
 #include "MoveSplineInitArgs.h"
 #include "dtQueryFilterTC.h"
 #include <G3D/Vector3.h>
+#include <vector>
 
 class WorldObject;
+struct ClosedDoorShape;
 
 // Unlocks the nav lock the calling thread still holds after a caught hardware fault skipped its destructor (MapUpdater). No-op otherwise.
 TC_GAME_API void ReleaseNavLockAfterFault();
@@ -77,12 +79,43 @@ class TC_GAME_API PathGenerator
         // Sources that keep out of liquid (see SetLiquidRouteCheck): the last CalculatePath found only a route through liquid,
         // no land route exists.
         bool IsWetRoute() const { return _wetRoute; }
+        // Why the last BuildPointPath added no swim down to a destination under the water (nullptr: it did, or none was asked).
+        // Empty when the dive leg was built or never needed.
+        std::string const& DiveRefusal() const { return _diveRefusal; }
+        // Why the last path came back incomplete (empty when it did not, or for a reason not named here).
+        std::string const& IncompleteReason() const { return _incompleteReason; }
 
         // Optional check (set by a module): returns true when `source` should keep out of liquid and `path` touches liquid.
         // CalculatePath then searches a land-only route and keeps it when it is dry, else keeps the first route (IsWetRoute).
         // `waterPolys`: the corridor runs over navmesh water polygons past its first one (the liquid probes miss some of them).
         using LiquidRouteCheck = bool(*)(WorldObject const* source, Movement::PointsArray const& path, bool waterPolys);
         static void SetLiquidRouteCheck(LiquidRouteCheck check) { _liquidRouteCheck = check; }
+        // Optional adjustment (set by a module): moves the points of a finished route whose corridor runs over navmesh water
+        // polygons, for a source whose body does not belong on those polygons (a bot swims under the surface they lie on). The
+        // first point is the source's own place and stays where it is; a moved last point becomes the route's actual end.
+        // Called on the thread that calculates the path.
+        using WaterRouteAdjust = void(*)(WorldObject const* source, Movement::PointsArray& path);
+        static void SetWaterRouteAdjust(WaterRouteAdjust adjust) { _waterRouteAdjust = adjust; }
+        // This path goes straight at its target whatever the source's liquid preference (a charge): no land-only search.
+        void SetIgnoreLiquidRouteCheck(bool ignore) { _ignoreLiquidRouteCheck = ignore; }
+
+        // Optional check (set by a module): which closed doors `source`'s paths must not run through. The navmesh is baked
+        // without game objects, so its corridors cross doors whatever their state. For such a source CalculatePath looks for a
+        // closed door on each leg of the route and searches again with the door's polygon left out, up to
+        // MAX_CLOSED_DOOR_DETOURS times; when the target lies only behind a closed door the result is PATHFIND_NOPATH.
+        // Live reads the map's game object models, so only on the source map's update thread or the world thread while the maps
+        // are still; anywhere else Published tests the doors the map last published (Map::GetPublishedClosedDoors), leaving out
+        // those planned through (ClosedDoorShape::PlanThrough).
+        enum class ClosedDoorTest : uint8
+        {
+            None,
+            Live,
+            Published
+        };
+        using ClosedDoorCheck = ClosedDoorTest(*)(WorldObject const* source);
+        static void SetClosedDoorCheck(ClosedDoorCheck check) { _closedDoorCheck = check; }
+        // The last CalculatePath left out at least one closed door, or found the target only behind one (then PATHFIND_NOPATH).
+        bool AvoidedClosedDoor() const { return _avoidedClosedDoor; }
         bool CalculatePath(float destX, float destY, float destZ, bool forceDest = false);
         bool IsInvalidDestinationZ(WorldObject const* target) const;
 
@@ -150,9 +183,19 @@ class TC_GAME_API PathGenerator
         // following). See dtQueryFilterTC.h.
         dtQueryFilterTC _filter;  // use single filter for all movements, update it when needed
         bool _avoidWater = false;
+        bool _ignoreLiquidRouteCheck = false;
         bool _wetRoute = false;
+        std::string _diveRefusal;
+        std::string _incompleteReason;
+        bool _avoidedClosedDoor = false;
         bool CalculatePathImpl(float srcX, float srcY, float srcZ, float destX, float destY, float destZ, bool forceDest);
+        bool CalculateLiquidAwarePath(float srcX, float srcY, float srcZ, float destX, float destY, float destZ, bool forceDest);
+        bool FindClosedDoorOnPath(G3D::Vector3& hit, std::vector<ClosedDoorShape> const* publishedDoors) const;
+        bool FinishPath(bool ok);
         static LiquidRouteCheck _liquidRouteCheck;
+        static WaterRouteAdjust _waterRouteAdjust;
+        static ClosedDoorCheck _closedDoorCheck;
+        static constexpr uint32 MAX_CLOSED_DOOR_DETOURS = 6;
 
     public:
         // Per-pathfind opt-out from the road-cost bonus. When set, this

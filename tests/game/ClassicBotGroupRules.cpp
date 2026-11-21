@@ -17,6 +17,7 @@
 #include "tc_catch2.h"
 
 #include "../../src/server/game/Groups/BotGroupRules.h"
+#include "../../src/modules/PlayerbotV2/Bot/IdleRuleErrands.h"
 
 using namespace BotGroupRules;
 
@@ -99,17 +100,33 @@ TEST_CASE("Round robin without bots rotates as before", "[ClassicBotGroupRules]"
 TEST_CASE("A raid of a player and bots that fits a party goes back to one", "[ClassicBotGroupRules]")
 {
     // player + 2 bots left in a raid, open world
-    REQUIRE(RevertBotRaidToParty(true, false, 3, 5, true, true, false));
-    REQUIRE(RevertBotRaidToParty(true, false, 5, 5, true, true, false));
+    REQUIRE(RevertBotRaidToParty(true, false, 3, 5, true, true, false, false));
+    REQUIRE(RevertBotRaidToParty(true, false, 5, 5, true, true, false, false));
     // six members: stays a raid
-    REQUIRE_FALSE(RevertBotRaidToParty(true, false, 6, 5, true, true, false));
+    REQUIRE_FALSE(RevertBotRaidToParty(true, false, 6, 5, true, true, false, false));
     // someone is on a raid map: the instance needs the raid
-    REQUIRE_FALSE(RevertBotRaidToParty(true, false, 3, 5, true, true, true));
+    REQUIRE_FALSE(RevertBotRaidToParty(true, false, 3, 5, true, true, true, false));
     // battleground or dungeon finder groups are left alone
-    REQUIRE_FALSE(RevertBotRaidToParty(true, true, 3, 5, true, true, false));
+    REQUIRE_FALSE(RevertBotRaidToParty(true, true, 3, 5, true, true, false, false));
     // a raid of players only, or of bots only, keeps its vanilla behaviour
-    REQUIRE_FALSE(RevertBotRaidToParty(true, false, 3, 5, false, true, false));
-    REQUIRE_FALSE(RevertBotRaidToParty(true, false, 3, 5, true, false, false));
+    REQUIRE_FALSE(RevertBotRaidToParty(true, false, 3, 5, false, true, false, false));
+    REQUIRE_FALSE(RevertBotRaidToParty(true, false, 3, 5, true, false, false, false));
+    // the leader made it a raid by hand: it stays one
+    REQUIRE_FALSE(RevertBotRaidToParty(true, false, 3, 5, true, true, false, true));
     // already a party
-    REQUIRE_FALSE(RevertBotRaidToParty(false, false, 3, 5, true, true, false));
+    REQUIRE_FALSE(RevertBotRaidToParty(false, false, 3, 5, true, true, false, false));
+}
+
+TEST_CASE("A companion following its player still answers the player's guild invite", "[ClassicBotGroupRules]")
+{
+    // Karrz 2026-11-16: Chaelanna (grouped with her player) had the invite pending and never accepted: "idle:guild_" errands
+    // are skipped for a bot led by a player, and the accept rule matched that prefix.
+    CHECK_FALSE(Playerbot::IsWorldErrand("idle:guild_invite_accept"));
+    // the guild errands that do take a bot about the world stay errands
+    CHECK(Playerbot::IsWorldErrand("idle:guild_recruit_nearby"));
+    CHECK(Playerbot::IsWorldErrand("idle:guild_bank_deposit"));
+    // and so do the other accept-free prefixes it sits next to
+    CHECK_FALSE(Playerbot::IsWorldErrand("idle:quest_start_item"));
+    CHECK(Playerbot::IsWorldErrand("idle:quest_turnin"));
+    CHECK_FALSE(Playerbot::IsWorldErrand("idle:group_invite_accept"));
 }

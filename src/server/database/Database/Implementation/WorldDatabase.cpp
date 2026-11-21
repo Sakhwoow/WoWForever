@@ -88,6 +88,25 @@ void WorldDatabaseConnection::DoPrepareStatements()
     // the quest-giver statement above so the Playerbot RepairVendorIndex can clone
     // the QuestHubDatabase load path verbatim.
     PrepareStatement(WORLD_SEL_REPAIR_VENDOR_SPAWNS, "SELECT c.guid, c.id, c.position_x, c.position_y, c.position_z, c.map, ct.faction, COALESCE(c.zoneId, 0) as zoneId FROM creature c INNER JOIN creature_template ct ON c.id = ct.entry WHERE ct.npcflag & 4096 != 0", CONNECTION_SYNCH);
+
+    // AuctionHouseBot.Vanilla.MarketPrices: per-unit market price of an item for the auction house bot
+    PrepareStatement(WORLD_SEL_AUCTIONHOUSEBOT_MARKET_PRICES, "SELECT ItemID, UnitPrice FROM auctionhousebot_market_price WHERE UnitPrice > 0", CONNECTION_SYNCH);
+    // Every item id at or above the bound that the realm gives out (all 15 placeholders take the same bound)
+    PrepareStatement(WORLD_SEL_BOT_REALM_ITEMS, "SELECT Item FROM creature_loot_template WHERE Item >= ? "
+        "UNION SELECT Item FROM gameobject_loot_template WHERE Item >= ? "
+        "UNION SELECT Item FROM reference_loot_template WHERE Item >= ? "
+        "UNION SELECT Item FROM item_loot_template WHERE Item >= ? "
+        "UNION SELECT item FROM npc_vendor WHERE item >= ? AND type = 1 "
+        "UNION SELECT RewardItem1 FROM quest_template WHERE RewardItem1 >= ? "
+        "UNION SELECT RewardItem2 FROM quest_template WHERE RewardItem2 >= ? "
+        "UNION SELECT RewardItem3 FROM quest_template WHERE RewardItem3 >= ? "
+        "UNION SELECT RewardItem4 FROM quest_template WHERE RewardItem4 >= ? "
+        "UNION SELECT RewardChoiceItemID1 FROM quest_template WHERE RewardChoiceItemID1 >= ? "
+        "UNION SELECT RewardChoiceItemID2 FROM quest_template WHERE RewardChoiceItemID2 >= ? "
+        "UNION SELECT RewardChoiceItemID3 FROM quest_template WHERE RewardChoiceItemID3 >= ? "
+        "UNION SELECT RewardChoiceItemID4 FROM quest_template WHERE RewardChoiceItemID4 >= ? "
+        "UNION SELECT RewardChoiceItemID5 FROM quest_template WHERE RewardChoiceItemID5 >= ? "
+        "UNION SELECT RewardChoiceItemID6 FROM quest_template WHERE RewardChoiceItemID6 >= ?", CONNECTION_SYNCH);
 }
 
 WorldDatabaseConnection::WorldDatabaseConnection(MySQLConnectionInfo& connInfo, ConnectionFlags connectionFlags) : MySQLConnection(connInfo, connectionFlags)

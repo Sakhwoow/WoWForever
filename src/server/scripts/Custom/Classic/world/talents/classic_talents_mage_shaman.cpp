@@ -22,6 +22,7 @@
 #include "ScriptMgr.h"
 #include "AreaTrigger.h"
 #include "CellImpl.h"
+#include "ClassicVanillaAoe.h"
 #include "Creature.h"
 #include "Item.h"
 #include "ItemTemplate.h"
@@ -37,6 +38,7 @@
 #include "SpellMgr.h"
 #include "SpellScript.h"
 #include "Unit.h"
+#include "World.h"
 #include <cmath>
 
 enum ClassicMageTalentSpells
@@ -291,7 +293,7 @@ class classic_spell_mage_fingers_of_frost : public AuraScript
 // 11185 - Improved Blizzard: "Adds a Chill effect to your Blizzard spell. This effect lowers the target's movement speed by 40%
 // for 1.5 sec." Blizzard (10, 6141, 8427, 10185-10187) ticks through classic_spell_ground_area_damage; this second script on the
 // same tick chills the enemies inside the Blizzard with 12484 (talent amount as the snare), which is a Chill effect for Fingers
-// of Frost.
+// of Frost. Forever ranks chill 15 / 25 / 40%; Forever.VanillaAoE = 1 chills the vanilla 30 / 50 / 65% (ClassicVanillaAoe.h).
 class classic_spell_mage_improved_blizzard : public AuraScript
 {
     bool Validate(SpellInfo const* /*spellInfo*/) override
@@ -309,6 +311,10 @@ class classic_spell_mage_improved_blizzard : public AuraScript
         if (!talent || talent->GetAmount() >= 0)
             return;
 
+        int32 chill = talent->GetAmountAsInt();
+        if (sWorld->getBoolConfig(CONFIG_FOREVER_VANILLA_AOE))
+            chill = ClassicVanillaAoe::ImprovedBlizzardChill(chill);
+
         SpellInfo const* spellInfo = GetSpellInfo();
         GuidUnorderedSet targets;
         for (AreaTrigger* areaTrigger : caster->GetAreaTriggers(spellInfo->Id))
@@ -321,7 +327,7 @@ class classic_spell_mage_improved_blizzard : public AuraScript
             if (!target || !target->IsAlive() || !caster->IsValidAttackTarget(target, spellInfo))
                 continue;
 
-            caster->CastSpell(target, SPELL_MAGE_CHILLED, CastSpellExtraArgs(TRIGGERED_FULL_MASK).AddSpellBP0(talent->GetAmount()));
+            caster->CastSpell(target, SPELL_MAGE_CHILLED, CastSpellExtraArgs(TRIGGERED_FULL_MASK).AddSpellBP0(chill));
             chilled = true;
         }
 
@@ -768,9 +774,9 @@ class classic_spell_mage_cone_of_cold_winters_chill : public SpellScript
     }
 };
 
-// 1326080, 1326081, 1326082 - Arcane Wrath (70532): "Launches a projectile of pure Arcane energy at the enemy target, causing $s1 Arcane
-// damage. This spell gains additional Spell Damage equal to $s2% of your maximum Mana." Effect 1 is the percentage as a dummy; the extra
-// spell damage counts like spell power, with the damage effect's coefficient.
+// 1326079 (the talent's rank), 1326080, 1326081, 1326082 - Arcane Wrath (70532): "Launches a projectile of pure Arcane energy at the enemy
+// target, causing $s1 Arcane damage. This spell gains additional Spell Damage equal to $s2% of your maximum Mana." Effect 1 is the percentage
+// as a dummy; the extra spell damage counts like spell power, with the damage effect's coefficient.
 class classic_spell_mage_arcane_wrath : public SpellScript
 {
     bool Validate(SpellInfo const* spellInfo) override
@@ -825,9 +831,10 @@ class classic_spell_mage_arcane_blast : public SpellScript
     }
 };
 
-// 400588 - Missile Barrage (70532): "Gives your Arcane Blast spell a $m1% chance, your Arcane Missile hits a ${$m1/4}% chance, and your Arcane
-// Wrath, Fireball, Frostbolt, and Frostfire Bolt spells a ${$m1/2}% chance to [give 400589]". The client proc data is a flat 50% on any
-// harmful spell. The spell_proc row sets the chance to 100 and lets the triggered missile hits proc; the chance per spell is rolled here.
+// 400588 - Missile Barrage (70707): "Gives your Arcane Blast spell a $m1% chance, and your Arcane Wrath, Fireball, Frostbolt, Frost Blast,
+// and Frostfire Bolt spells a ${$m1/2}% chance to [give 400589]". The client proc data is a flat 50% on any harmful spell. The spell_proc
+// row sets the chance to 100; the chance per spell is rolled here. The 70532 text also gave Arcane Missile hits a ${$m1/4}% chance; live
+// dropped that, so the missiles of a Missile Barrage no longer give the next one (glacier, Discord 17 Nov).
 class classic_spell_mage_missile_barrage : public AuraScript
 {
     static bool IsHalfChanceSpell(SpellInfo const* spellInfo)
@@ -840,7 +847,7 @@ class classic_spell_mage_missile_barrage : public AuraScript
             default:
                 break;
         }
-        // Fireball (word 0 0x1), Frostbolt (0x20)
+        // Fireball (word 0 0x1), Frostbolt and Frost Blast 1326053-1326055 (0x20)
         return spellInfo->SpellFamilyName == SPELLFAMILY_MAGE && (spellInfo->SpellFamilyFlags[0] & (0x1 | 0x20));
     }
 
@@ -853,16 +860,54 @@ class classic_spell_mage_missile_barrage : public AuraScript
         float const chance = float(aurEff->GetAmount());
         if (spellInfo->SpellFamilyName == SPELLFAMILY_MAGE && (spellInfo->SpellFamilyFlags[0] & 0x20000000))  // Arcane Blast
             return roll_chance(chance);
-        if (spellInfo->SpellFamilyName == SPELLFAMILY_MAGE && (spellInfo->SpellFamilyFlags[0] & 0x200000))    // Arcane Missiles hits
-            return roll_chance(chance / 4.0f);
         if (IsHalfChanceSpell(spellInfo))
             return roll_chance(chance / 2.0f);
+        return false;
+    }
+
+    // Effect 1 is a dummy that only holds the missile period ($m2 = 5, "missiles fire every 0.5 sec", read by the Arcane Missiles
+    // script below), but the client data gives it 400589 as its trigger spell, and a dummy aura with a trigger spell casts it on every
+    // proc (AuraEffect::HandleProc). It had no check, so every harmful spell gave Missile Barrage: Frostbolt and the rest at 100%
+    // (glacier, Discord 20 Nov). It never procs; effect 0 above is the one chance.
+    bool CheckPeriodHolderProc(AuraEffect const* /*aurEff*/, ProcEventInfo& /*eventInfo*/)
+    {
         return false;
     }
 
     void Register() override
     {
         DoCheckEffectProc += AuraCheckEffectProcFn(classic_spell_mage_missile_barrage::CheckProc, EFFECT_0, SPELL_AURA_PROC_TRIGGER_SPELL);
+        DoCheckEffectProc += AuraCheckEffectProcFn(classic_spell_mage_missile_barrage::CheckPeriodHolderProc, EFFECT_1, SPELL_AURA_DUMMY);
+    }
+};
+
+// 5143, 5144, 5145, 8416, 8417, 10211, 10212, 25345 - Arcane Missiles, with Missile Barrage 400589 up: "missiles fire every
+// ${$400588w2/10}.1 sec". The buff's effect 1 is a dummy holding the change of the missile period (-500 ms), which nothing read, so
+// the missiles came once a second over the halved channel: two or three missiles instead of five (glacier, Discord 17 Nov). The
+// buff is used up when the channel hits (spell_proc 400589, 2026_11_17_17), after its aura took the shorter period here.
+class classic_spell_mage_arcane_missiles_barrage : public AuraScript
+{
+    static constexpr uint32 SPELL_MAGE_MISSILE_BARRAGE_BUFF = 400589;
+
+    bool Validate(SpellInfo const* /*spellInfo*/) override
+    {
+        return ValidateSpellEffect({ { SPELL_MAGE_MISSILE_BARRAGE_BUFF, EFFECT_1 } });
+    }
+
+    void CalcPeriodic(AuraEffect const* /*aurEff*/, bool& isPeriodic, int32& amplitude)
+    {
+        Unit* caster = GetCaster();
+        if (!isPeriodic || !caster)
+            return;
+
+        if (AuraEffect const* barrage = caster->GetAuraEffect(SPELL_MAGE_MISSILE_BARRAGE_BUFF, EFFECT_1))
+            if (amplitude + barrage->GetAmount() > 0)
+                amplitude += barrage->GetAmount();
+    }
+
+    void Register() override
+    {
+        DoEffectCalcPeriodic += AuraEffectCalcPeriodicFn(classic_spell_mage_arcane_missiles_barrage::CalcPeriodic, EFFECT_0, SPELL_AURA_PERIODIC_TRIGGER_SPELL);
     }
 };
 
@@ -1617,6 +1662,7 @@ void AddSC_classic_talents_mage_shaman()
     RegisterSpellScript(classic_spell_mage_cone_of_cold_winters_chill);
     RegisterSpellScript(classic_spell_mage_arcane_blast);
     RegisterSpellScript(classic_spell_mage_missile_barrage);
+    RegisterSpellScript(classic_spell_mage_arcane_missiles_barrage);
 
     // Shaman
     RegisterSpellScript(classic_spell_sha_flurry);

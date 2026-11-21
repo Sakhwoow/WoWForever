@@ -254,11 +254,8 @@ Optional<Battlenet::RealmHandle> RealmList::GetFirstRealmId() const
 
 // A realm lists for and lets in clients of its own build. Realm.AlsoAcceptBuilds (default empty) adds client builds that use the same game data and
 // protocol as the realm's build, e.g. a realm on 70532 that 70575 clients may also join.
-static bool RealmAcceptsBuild(Realm const& realm, uint32 clientBuild)
+static std::vector<uint32> const& AlsoAcceptedBuilds()
 {
-    if (realm.Build == clientBuild)
-        return true;
-
     static std::vector<uint32> const alsoAccepted = []()
     {
         std::vector<uint32> builds;
@@ -266,10 +263,24 @@ static bool RealmAcceptsBuild(Realm const& realm, uint32 clientBuild)
         for (std::string_view token : Trinity::Tokenize(configured, ',', false))
             if (Optional<uint32> build = Trinity::StringTo<uint32>(token))
                 builds.push_back(*build);
+        // a listed build needs its auth build_info row too (sql/custom/auth/*_auth_classic_<build>.sql): without it the login of that
+        // client fails although the realm lists it. A repack that turns the auth updates off never gets the row (2026-11-14).
+        for (uint32 build : builds)
+            if (!ClientBuild::GetBuildInfo(build))
+                TC_LOG_ERROR("realmlist", "Realm.AlsoAcceptBuilds lists {} but auth.build_info has no row for it: clients of that build cannot log in. "
+                    "Let the auth updates run (Updates.EnableDatabases includes 1) so sql/custom/auth is applied, or add the row.", build);
         return builds;
     }();
 
-    return std::ranges::find(alsoAccepted, clientBuild) != alsoAccepted.end();
+    return alsoAccepted;
+}
+
+static bool RealmAcceptsBuild(Realm const& realm, uint32 clientBuild)
+{
+    if (realm.Build == clientBuild)
+        return true;
+
+    return std::ranges::find(AlsoAcceptedBuilds(), clientBuild) != AlsoAcceptedBuilds().end();
 }
 
 void RealmList::FillRealmEntry(Realm const& realm, uint32 clientBuild, AccountTypes accountSecurityLevel, JSON::RealmList::RealmEntry* realmEntry) const
@@ -443,8 +454,20 @@ RealmJoinResult RealmList::JoinRealm(uint32 realmAddress, uint32 build, ClientBu
 {
     if (std::shared_ptr<Realm const> realm = GetRealm(realmAddress))
     {
-        if (realm->PopulationLevel == RealmPopulationState::Offline || !RealmAcceptsBuild(*realm, build) || accountSecurityLevel < realm->AllowedSecurityLevel)
+        if (realm->PopulationLevel == RealmPopulationState::Offline || accountSecurityLevel < realm->AllowedSecurityLevel)
             return { .Result = ERROR_USER_SERVER_NOT_PERMITTED_ON_REALM };
+
+        // a wrong client build gets its own answer (version mismatch), so a client can tell it apart from a closed realm
+        if (!RealmAcceptsBuild(*realm, build))
+        {
+            std::string accepted = std::to_string(realm->Build);
+            for (uint32 alsoAccepted : AlsoAcceptedBuilds())
+                accepted += ", " + std::to_string(alsoAccepted);
+
+            TC_LOG_INFO("realmlist", "Account {} tried to join realm {} with client build {}; the realm accepts builds {}.",
+                accountName, realm->Name, build, accepted);
+            return { .Result = ERROR_USER_SERVER_VERSION_MISMATCH };
+        }
 
         boost::asio::ip::address addressForClient = realm->GetAddressForClient(clientAddress);
 

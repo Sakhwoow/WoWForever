@@ -59,6 +59,7 @@
 #include "CreatureAI.h"
 #include "DB2Stores.h"
 #include "DatabaseEnv.h"
+#include "DayCycle.h"
 #include "DisableMgr.h"
 #include "DuelPackets.h"
 #include "EquipmentSetPackets.h"
@@ -75,6 +76,7 @@
 #include "GridNotifiersImpl.h"
 #include "Group.h"
 #include "GroupMgr.h"
+#include "HeadlessPackets.h"
 #include "GameTables.h"
 #include "GameTime.h"
 #include "Guild.h"
@@ -121,6 +123,7 @@
 #include "QuestPackets.h"
 #include "RealmList.h"
 #include "RecentAllies.h"
+#include "ReputationDiscount.h"
 #include "ReputationMgr.h"
 #include "RestMgr.h"
 #include "Scenario.h"
@@ -136,6 +139,7 @@
 #include "StringConvert.h"
 #include "TalentPackets.h"
 #include "TerrainMgr.h"
+#include "Timezone.h"
 #include "ToyPackets.h"
 #include "TradeData.h"
 #include "TraitMgr.h"
@@ -249,6 +253,7 @@ Player::Player(WorldSession* session) : Unit(true), m_sceneMgr(this)
 
     m_hostileReferenceCheckTimer = 0;
     m_drunkTimer = 0;
+    m_skyMode = uint8(DayCycle::SkyMode::Auto);
     m_deathTimer = 0;
     m_deathExpireTime = 0;
 
@@ -374,6 +379,10 @@ Player::~Player()
 {
     // it must be unloaded already in PlayerLogout and accessed only for logged in player
     //m_social = nullptr;
+
+    for (Item* item : m_itemUpdateQueue)
+        if (item)
+            RemoveItemFromUpdateQueueOf(item, this);
 
     // Note: buy back item already deleted from DB when player was saved
     for (uint8 i = 0; i < PLAYER_SLOTS_COUNT; ++i)
@@ -703,7 +712,9 @@ int32 Player::getMaxTimer(MirrorTimerType timer) const
             if (!IsAlive() || HasAuraType(SPELL_AURA_WATER_BREATHING) || GetSession()->GetSecurity() >= AccountTypes(sWorld->getIntConfig(CONFIG_DISABLE_BREATHING)))
                 return DISABLED_MIRROR_TIMER;
 
-            int32 UnderWaterTime = 3 * MINUTE * IN_MILLISECONDS;
+            // Classic 1.60 (vanilla, Classic Era): 1 minute of breath; 3 minutes came with patch 3.0.2. The Forever client's Undead
+            // Underwater Breathing 5227 is still "300% longer than normal", the vanilla 4 minutes.
+            int32 UnderWaterTime = MINUTE * IN_MILLISECONDS;
             UnderWaterTime *= GetTotalAuraMultiplier(SPELL_AURA_MOD_WATER_BREATHING);
             return UnderWaterTime;
         }
@@ -961,6 +972,7 @@ void Player::Update(uint32 p_time)
     SetCanDelayTeleport(false);
 
     UpdateParkedPet(p_time);
+    UpdateCombatNameplates(p_time);
 
     // The pet remembered at login comes back a moment after the player is in the world, as a summon during play does. Created while the
     // Classic 1.60 client is still on its loading screen, the client froze on the pet (warlock demon out at logout, 20 Oct).
@@ -1836,18 +1848,19 @@ void Player::RegenerateHealth()
     // normal regen case (maybe partly in combat case)
     else if (!IsInCombat() || HasAuraType(SPELL_AURA_MOD_REGEN_DURING_COMBAT))
     {
-        addValue = HealthIncreaseRate;
+        // Classic 1.60 (vanilla): health per tick from spirit (retail: 1.5% of max health)
+        addValue = OCTRegenHPPerSpirit() * HealthIncreaseRate;
 
         if (!IsInCombat())
         {
-            // Classic 1.60 (vanilla): health per tick from spirit (retail: 1.5% of max health)
-            addValue = OCTRegenHPPerSpirit() * HealthIncreaseRate;
-
             addValue *= GetTotalAuraMultiplier(SPELL_AURA_MOD_HEALTH_REGEN_PERCENT);
 
             addValue += GetTotalAuraModifier(SPELL_AURA_MOD_REGEN) * 0.4f;
         }
-        else if (HasAuraType(SPELL_AURA_MOD_REGEN_DURING_COMBAT))
+        else
+            // a share of the spirit regen goes on in combat (Troll Regeneration 20555: "20% of total Health regeneration will continue
+            // during combat"; VMaNGOS Player::RegenerateHealth). The retail rule took the share of Rate.Health alone, a fraction of
+            // one health per tick.
             ApplyPct(addValue, GetTotalAuraModifier(SPELL_AURA_MOD_REGEN_DURING_COMBAT));
 
         if (!IsStandState())
@@ -2451,9 +2464,10 @@ void Player::UpdateClassicLegacyUnlock()
     // Renown on the Legacy reward track = Legacy Points earned: the challenges ("Reach level 25/45/60 for the first time on <class>")
     // are TraitCurrencySource rows of currency 4225. Rows still tied to another ruleset (SuperDistrictSetID != 0 after the
     // 2026_09_30_00 hotfix) belong to the other copy of each challenge and are not counted. The first point comes at level 25.
+    // The points are the account's: a challenge any of its characters did counts ("Points are shared across your whole account").
     int32 earnedLegacyPoints = 0;
     for (TraitCurrencySourceEntry const* source : sTraitCurrencySourceStore)
-        if (source->TraitCurrencyID == LegacyPointsTraitCurrencyID && !source->SuperDistrictSetID && source->AchievementID && HasAchieved(source->AchievementID))
+        if (source->TraitCurrencyID == LegacyPointsTraitCurrencyID && !source->SuperDistrictSetID && source->AchievementID && HasAchievedOnAccount(source->AchievementID))
             earnedLegacyPoints += source->Amount;
 
     int32 renown = int32(GetCurrencyQuantity(LegacyRenownCurrencyID));
@@ -3233,6 +3247,11 @@ bool Player::AddSpell(uint32 spellId, bool active, bool learning, bool dependent
         castSpell = true;
     else if (spellInfo->HasAttribute(SPELL_ATTR1_CAST_WHEN_LEARNED))
         castSpell = true;
+    // A hidden form spell (AuraEffect::HandleShapeshiftBoosts casts it at every shapeshift into one of its forms) learned while already
+    // in such a form goes on now, as it would at the next shapeshift (Feral Charge 1238122 teaches the Cat Form override 414925)
+    else if (!loading && IsInWorld() && spellInfo->Stances && spellInfo->HasAttribute(SPELL_ATTR0_DO_NOT_DISPLAY_SPELLBOOK_AURA_ICON_COMBAT_LOG))
+        if (ShapeshiftForm const form = GetShapeshiftForm(); form != FORM_NONE)
+            castSpell = (spellInfo->Stances & (UI64LIT(1) << (form - 1))) != 0;
 
     if (castSpell)
     {
@@ -3378,6 +3397,17 @@ bool Player::AddSpell(uint32 spellId, bool active, bool learning, bool dependent
     }
     else
     {
+        // Classic 1.60: a spell listed under several skill lines is one ability those lines share, so learning it does not open
+        // the lines the player lacks. Languages 1293657 sits under Common 98 and Orcish 109 (AutomaticCharLevel in both): every
+        // character learns it from its own language and was then given the other faction's language at 1/300 through
+        // SkillRaceClassInfo 49 (Orcish for Alliance) or 41 (Common for Horde), both Availability 0. On the official realm
+        // those lines show 0/0 (70938 login sniffs, 18 and 19 Nov 2026). The other such spells are pet abilities.
+        bool const sharedBySkillLines = skill_bounds.first != skill_bounds.second
+            && std::any_of(skill_bounds.first, skill_bounds.second, [first = skill_bounds.first->second->SkillLine](SkillLineAbilityMap::value_type const& ability)
+            {
+                return ability.second->SkillLine != first;
+            });
+
         // not ranked skills
         for (SkillLineAbilityMap::const_iterator _spell_idx = skill_bounds.first; _spell_idx != skill_bounds.second; ++_spell_idx)
         {
@@ -3389,7 +3419,8 @@ bool Player::AddSpell(uint32 spellId, bool active, bool learning, bool dependent
                 continue;
 
             // Runeforging special case
-            if ((_spell_idx->second->GetAcquireMethod() == SkillLineAbilityAcquireMethod::AutomaticCharLevel && !HasSkill(_spell_idx->second->SkillLine)) || ((_spell_idx->second->SkillLine == SKILL_RUNEFORGING) && _spell_idx->second->TrivialSkillLineRankHigh == 0))
+            if ((_spell_idx->second->GetAcquireMethod() == SkillLineAbilityAcquireMethod::AutomaticCharLevel && !sharedBySkillLines && !HasSkill(_spell_idx->second->SkillLine))
+                || ((_spell_idx->second->SkillLine == SKILL_RUNEFORGING) && _spell_idx->second->TrivialSkillLineRankHigh == 0))
             {
                 if (SkillRaceClassInfoEntry const* rcInfo = sDB2Manager.GetSkillRaceClassInfo(_spell_idx->second->SkillLine, GetRace(), GetClass()))
                     LearnDefaultSkill(rcInfo);
@@ -4595,6 +4626,10 @@ void Player::DeleteFromDB(ObjectGuid playerguid, uint32 accountId, bool updateRe
             stmt->setUInt64(0, guid);
             trans->Append(stmt);
 
+            stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_CHARACTER_DAY_CYCLE);
+            stmt->setUInt64(0, guid);
+            trans->Append(stmt);
+
             sCharacterCache->DeleteCharacterCacheEntry(playerguid, name);
             break;
         }
@@ -4731,7 +4766,7 @@ bool Player::RefuseHardcoreResurrect()
 {
     // Classic 1.60 Hardcore ruleset realm (Classic.Hardcore = 1): death is permanent, no spirit healer, corpse run or resurrection spell
     // brings the character back, also not on game master accounts. Only staff using the .revive command can (SetHardcoreReviveAllowed).
-    if (IsAlive() || m_hardcoreReviveAllowed || !sConfigMgr->GetBoolDefault("Classic.Hardcore", false))
+    if (IsAlive() || m_hardcoreReviveAllowed || !sWorld->getBoolConfig(CONFIG_CLASSIC_HARDCORE))
         return false;
 
     ChatHandler(GetSession()).SendSysMessage("Хардкор: этот персонаж пал. На этом мире смерть окончательна.");
@@ -4797,6 +4832,11 @@ void Player::ResurrectPlayer(float restore_percent, bool applySickness)
 
     // recast lost by death auras of any items held in the inventory
     CastAllObtainSpells();
+
+    // and the equip auras death took: a classic equip spell is often not passive (Onyxia Scale Cloak 22683 has no passive attribute
+    // in the 1.60 data), so RemoveAllAurasOnDeath removed it and nothing cast it again until the item was re-equipped. Every raider
+    // who died once was then open to Shadow Flame's burn 22682 with the cloak still on (BWL Nefarian, dev realm 2026-11-13).
+    CastAllEquipSpellsLostOnDeath();
 
     if (!applySickness)
         return;
@@ -5089,6 +5129,7 @@ void Player::DurabilityRepairAll(bool takeCost, float discountMod, bool guildBan
 
         // We must calculate total repair cost and take money once to avoid spam in the guild bank log and reduce number of transactions in the database
         uint64 totalCost = 0;
+        std::vector<Item*> paidFor;
 
         for (auto const& [item, cost] : itemRepairCostStore)
         {
@@ -5097,13 +5138,16 @@ void Player::DurabilityRepairAll(bool takeCost, float discountMod, bool guildBan
                 break;
 
             totalCost = newTotalCost;
-
-            // Repair item without taking cost. We'll do it later.
-            DurabilityRepair(item->GetPos(), false, 0.f);
+            paidFor.push_back(item);
         }
 
-        // Take money for repairs from the guild bank
-        guild->HandleMemberWithdrawMoney(GetSession(), totalCost, true);
+        // Take the money from the guild bank first and repair only when it was taken. The items were repaired before and the withdraw's
+        // result was not looked at, so a refused withdraw (no repair right, the bank emptied meanwhile) left the repair free.
+        if (paidFor.empty() || !guild->HandleMemberWithdrawMoney(GetSession(), totalCost, true))
+            return;
+
+        for (Item* item : paidFor)
+            DurabilityRepair(item->GetPos(), false, 0.f);
     }
     else
     {
@@ -5521,19 +5565,24 @@ float Player::GetTotalBaseModValue(BaseModGroup modGroup) const
     return m_auraBaseFlatMod[modGroup] * m_auraBasePctMod[modGroup];
 }
 
-// Classic 1.60 (vanilla, VMaNGOS / TrinityCoreClassic): agility per 1% of crit and dodge, between the class rates of level 1 and 60
+// Classic 1.60 (vanilla, VMaNGOS / TrinityCoreClassic): agility per 1% of crit and dodge, between the class rates of level 1 and 60.
+// WoW Forever: the level 60 rates are the client's PlayerExpectedStat CritPerAgility (rogue 0.000345, hunter 0.000189,
+// paladin 0.000506, shaman 0.000508, mage 0.000514, others 0.0005 per point), dodge per agility equal to crit, rogue and hunter twice
+// (wowsims/forever, MIT, sim/core/base_stats_auto_gen.go). The level 1 rates stay vanilla's; the table's lower levels are not checked.
 static float ClassicAgilityRate(Player const* player, bool dodge)
 {
     float level1, level60;
     switch (player->GetClass())
     {
-        case CLASS_ROGUE:   level1 = dodge ? 1.1f : 2.2f;  level60 = dodge ? 14.5f : 29.0f; break;
-        case CLASS_HUNTER:  level1 = dodge ? 1.8f : 3.5f;  level60 = dodge ? 26.5f : 53.0f; break;
-        case CLASS_MAGE:    level1 = 12.9f; level60 = 20.0f; break;
+        case CLASS_ROGUE:   level1 = dodge ? 1.1f : 2.2f;  level60 = (dodge ? 0.5f : 1.0f) / 0.0345f; break;
+        case CLASS_HUNTER:  level1 = dodge ? 1.8f : 3.5f;  level60 = (dodge ? 0.5f : 1.0f) / 0.0189f; break;
+        case CLASS_MAGE:    level1 = 12.9f; level60 = 1.0f / 0.0514f; break;
         case CLASS_PRIEST:  level1 = 11.0f; level60 = 20.0f; break;
         case CLASS_WARLOCK: level1 = 8.4f;  level60 = 20.0f; break;
         case CLASS_WARRIOR: level1 = 3.9f;  level60 = 20.0f; break;
-        default:            level1 = 4.6f;  level60 = 20.0f; break;  // paladin, shaman, druid
+        case CLASS_PALADIN: level1 = 4.6f;  level60 = 1.0f / 0.0506f; break;
+        case CLASS_SHAMAN:  level1 = 4.6f;  level60 = 1.0f / 0.0508f; break;
+        default:            level1 = 4.6f;  level60 = 20.0f; break;  // druid
     }
     float level = float(std::min<uint8>(player->GetLevel(), 60));
     return level1 * (60.0f - level) / 59.0f + level60 * (level - 1.0f) / 59.0f;
@@ -5550,19 +5599,22 @@ void Player::GetDodgeFromAgility(float& diminishing, float& nondiminishing) cons
     nondiminishing = std::max(0.0f, GetStat(STAT_AGILITY)) / ClassicAgilityRate(this, true);
 }
 
-// Classic 1.60 (vanilla): base spell crit and intellect per 1% of spell crit at level 60 per class; lower levels need less
+// Classic 1.60 (vanilla): base spell crit and intellect per 1% of spell crit at level 60 per class; lower levels need less.
+// WoW Forever: the level 60 rates are the client's PlayerExpectedStat SpellCritPerIntellect (mage and priest 0.000168,
+// shaman 0.000169, paladin and druid 0.000167, warlock and hunter 0.000165 per point; wowsims/forever, MIT,
+// sim/core/base_stats_auto_gen.go). Paladins needed 54 (vanilla), now 59.9. The base crit already matched.
 float Player::GetSpellCritFromIntellect() const
 {
     float base, rate60;
     switch (GetClass())
     {
-        case CLASS_MAGE:    base = 0.2f; rate60 = 59.5f; break;
-        case CLASS_PRIEST:  base = 0.8f; rate60 = 59.2f; break;
-        case CLASS_WARLOCK: base = 1.7f; rate60 = 60.6f; break;
-        case CLASS_DRUID:   base = 1.8f; rate60 = 60.0f; break;
-        case CLASS_SHAMAN:  base = 2.3f; rate60 = 59.5f; break;
-        case CLASS_PALADIN: base = 3.5f; rate60 = 54.0f; break;
-        case CLASS_HUNTER:  base = 3.6f; rate60 = 60.0f; break;
+        case CLASS_MAGE:    base = 0.2f; rate60 = 1.0f / 0.0168f; break;
+        case CLASS_PRIEST:  base = 0.8f; rate60 = 1.0f / 0.0168f; break;
+        case CLASS_WARLOCK: base = 1.7f; rate60 = 1.0f / 0.0165f; break;
+        case CLASS_DRUID:   base = 1.8f; rate60 = 1.0f / 0.0167f; break;
+        case CLASS_SHAMAN:  base = 2.3f; rate60 = 1.0f / 0.0169f; break;
+        case CLASS_PALADIN: base = 3.5f; rate60 = 1.0f / 0.0167f; break;
+        case CLASS_HUNTER:  base = 3.6f; rate60 = 1.0f / 0.0165f; break;
         default:            return 0.0f;                    // warrior, rogue
     }
     float level = float(std::min<uint8>(GetLevel(), 60));
@@ -8461,9 +8513,19 @@ void Player::DuelComplete(DuelCompleteType type)
 
     if (type != DUEL_INTERRUPTED)
     {
+        // Classic 1.60: live sends each name with its surname ("Name Surname"), the client prints the strings as they come
+        auto nameWithSurname = [](Player const* player)
+        {
+            std::string name = player->GetName();
+            std::string const surname = sCharacterCache->GetCharacterSurnameByGuid(player->GetGUID());
+            if (!surname.empty())
+                name += " " + surname;
+            return name;
+        };
+
         WorldPackets::Duel::DuelWinner duelWinner;
-        duelWinner.BeatenName = (type == DUEL_WON ? opponent : this)->GetName();
-        duelWinner.WinnerName = (type == DUEL_WON ? this : opponent)->GetName();
+        duelWinner.BeatenName = nameWithSurname(type == DUEL_WON ? opponent : this);
+        duelWinner.WinnerName = nameWithSurname(type == DUEL_WON ? this : opponent);
         duelWinner.BeatenVirtualRealmAddress = (type == DUEL_WON ? opponent : this)->m_playerData->VirtualPlayerRealm;
         duelWinner.WinnerVirtualRealmAddress = (type == DUEL_WON ? this : opponent)->m_playerData->VirtualPlayerRealm;
         duelWinner.Fled = type != DUEL_WON;
@@ -8594,6 +8656,8 @@ void Player::_ApplyItemMods(Item* item, uint8 slot, bool apply, bool updateItemA
 
     TC_LOG_DEBUG("entities.player.items", "Player::_ApplyItemMods: completed");
 }
+
+static bool ClassicEquipSpellGivesItemModSkill(Item const* item, int32 statType);
 
 void Player::_ApplyItemBonuses(Item* item, uint8 slot, bool apply)
 {
@@ -8802,6 +8866,7 @@ void Player::_ApplyItemBonuses(Item* item, uint8 slot, bool apply)
                 break;
             case ITEM_MOD_EXTRA_ARMOR:
                 HandleStatFlatModifier(UNIT_MOD_ARMOR, TOTAL_VALUE, float(val), apply);
+                m_classicItemArmor += apply ? float(val) : -float(val);
                 break;
             case ITEM_MOD_FIRE_RESISTANCE:
                 HandleStatFlatModifier(UNIT_MOD_RESISTANCE_FIRE, BASE_VALUE, float(val), apply);
@@ -8876,7 +8941,8 @@ void Player::_ApplyItemBonuses(Item* item, uint8 slot, bool apply)
                 _ApplyClassicSpellHealingOrDamageMod(statType, int32(val), apply);
                 break;
             default:
-                if (statType >= ITEM_MOD_CLASSIC_PHYSICAL_DAMAGE_DONE && statType < ITEM_MOD_CLASSIC_END)
+                if (statType >= ITEM_MOD_CLASSIC_PHYSICAL_DAMAGE_DONE && statType < ITEM_MOD_CLASSIC_END
+                    && !ClassicEquipSpellGivesItemModSkill(item, statType))
                     _ApplyClassicItemMod(statType, int32(val), apply);
                 break;
         }
@@ -8885,8 +8951,32 @@ void Player::_ApplyItemBonuses(Item* item, uint8 slot, bool apply)
     if (uint32 armor = proto->GetArmor(itemLevel))
     {
         HandleStatFlatModifier(UNIT_MOD_ARMOR, TOTAL_VALUE, float(armor), apply);
+        m_classicItemArmor += apply ? float(armor) : -float(armor);
         if (proto->GetClass() == ITEM_CLASS_ARMOR && proto->GetSubClass() == ITEM_SUBCLASS_ARMOR_SHIELD)
             SetUpdateFieldValue(m_values.ModifyValue(&Player::m_activePlayerData).ModifyValue(&UF::ActivePlayerData::ShieldBlock), apply ? int32(GetClassicShieldBlockValue()) : 0);
+    }
+
+    // Classic 1.60 (WoW Forever): an armor item's ItemSparse QualityModifier is its green bonus armor, the "+60 Armor" line under Tree Bark
+    // Jacket's "44 Armor" (44 + 60 = its vanilla 104). The core read only the table armor, so 491 items in wowsims' item list lost it
+    // (Heavy Mithril Breastplate +90, Green Iron Hauberk +120). It counts as item armor, as ITEM_MOD_EXTRA_ARMOR does (wowsims/forever, MIT,
+    // tools/database/dbc/item.go GetStats; the tooltip of item 1486)
+    if (float const bonusArmor = proto->GetClassicBonusArmor())
+    {
+        HandleStatFlatModifier(UNIT_MOD_ARMOR, TOTAL_VALUE, bonusArmor, apply);
+        m_classicItemArmor += apply ? bonusArmor : -bonusArmor;
+    }
+
+    // Classic 1.60 (WoW Forever): a caster weapon's implicit spell power, or healing and damage (ItemTemplate::GetClassicCasterPower,
+    // EV-0112); the client's tooltip shows it, the server never gave it
+    {
+        int32 spellPower = 0, healing = 0, damage = 0;
+        proto->GetClassicCasterPower(itemLevel, spellPower, healing, damage);
+        if (spellPower)
+            ApplySpellPowerBonus(spellPower, apply);
+        if (healing)
+            _ApplyClassicSpellHealingOrDamageMod(ITEM_MOD_SPELL_HEALING_DONE, healing, apply);
+        if (damage)
+            _ApplyClassicSpellHealingOrDamageMod(ITEM_MOD_SPELL_DAMAGE_DONE, damage, apply);
     }
 
     WeaponAttackType attType = Player::GetAttackBySlot(slot, proto->GetInventoryType());
@@ -8903,6 +8993,31 @@ static constexpr uint32 ClassicItemModSkills[] =
     SKILL_MINING, SKILL_SKINNING, SKILL_COOKING, 129 /*First Aid*/, SKILL_FISHING, SKILL_TAILORING
 };
 static_assert(std::size(ClassicItemModSkills) == ITEM_MOD_CLASSIC_TAILORING - ITEM_MOD_CLASSIC_TWOHANDED_AXES + 1);
+
+// Classic 1.60 (WoW Forever): an item that states a skill bonus both as an item stat and as an equip spell (Bloody Claws of Attack 280068:
+// stat 98 +1 Fist Weapons and equip spell 1297442 +1 Fist Weapons) gives it once; the in-game tooltip shows one +1 (wowsims/forever,
+// MIT, docs/evidence EV-0104). The equip spell's aura stays and the item stat is left out.
+static bool ClassicEquipSpellGivesItemModSkill(Item const* item, int32 statType)
+{
+    if (statType < ITEM_MOD_CLASSIC_TWOHANDED_AXES || statType > ITEM_MOD_CLASSIC_TAILORING)
+        return false;
+
+    uint32 const skill = ClassicItemModSkills[statType - ITEM_MOD_CLASSIC_TWOHANDED_AXES];
+    for (ItemEffectEntry const* effectData : item->GetEffects())
+    {
+        if (effectData->TriggerType != ITEM_SPELLTRIGGER_ON_EQUIP)
+            continue;
+
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(effectData->SpellID, DIFFICULTY_NONE);
+        if (!spellInfo)
+            continue;
+
+        for (SpellEffectInfo const& effect : spellInfo->GetEffects())
+            if ((effect.IsAura(SPELL_AURA_MOD_SKILL) || effect.IsAura(SPELL_AURA_MOD_SKILL_2)) && uint32(effect.MiscValue) == skill)
+                return true;
+    }
+    return false;
+}
 
 // Classic 1.60: schools of ITEM_MOD_CLASSIC_FIRE_PENETRATION .. ITEM_MOD_CLASSIC_ARCANE_PENETRATION
 static constexpr SpellSchools ClassicItemModPenetrationSchools[] =
@@ -9003,9 +9118,8 @@ void Player::_ApplyWeaponDamage(uint8 slot, Item* item, bool apply)
         return;
 
     float damage = 0.0f;
-    uint32 itemLevel = item->GetItemLevel(this);
     float minDamage, maxDamage;
-    proto->GetDamage(itemLevel, minDamage, maxDamage);
+    item->GetClassicWeaponDamage(this, minDamage, maxDamage);   // Classic 1.60: caster share and QualityModifier (EV-0097)
 
     if (minDamage > 0)
     {
@@ -9068,6 +9182,35 @@ void Player::CastAllObtainSpells()
         for (uint32 slot = 0; slot < bag->GetBagSize(); ++slot)
             if (Item* item = bag->GetItemByPos(slot))
                 ApplyItemObtainSpells(item, true);
+    }
+}
+
+void Player::CastAllEquipSpellsLostOnDeath()
+{
+    for (uint8 slot = EQUIPMENT_SLOT_START; slot < EQUIPMENT_SLOT_END; ++slot)
+    {
+        Item* item = GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
+        if (!item || item->IsBroken() || item->GetTemplate()->HasFlag(ITEM_FLAG_LEGACY))
+            continue;
+
+        for (ItemEffectEntry const* effectData : item->GetEffects())
+        {
+            if (effectData->TriggerType != ITEM_SPELLTRIGGER_ON_EQUIP)
+                continue;
+
+            SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(effectData->SpellID, DIFFICULTY_NONE);
+            // passive and death-persistent auras survive death (RemoveAllAurasOnDeath); only the others need casting again
+            if (!spellInfo || spellInfo->IsPassive() || spellInfo->IsDeathPersistent())
+                continue;
+
+            if (effectData->ChrSpecializationID && ChrSpecialization(effectData->ChrSpecializationID) != GetPrimarySpecialization())
+                continue;
+
+            if (HasAura(spellInfo->Id, GetGUID(), item->GetGUID()))
+                continue;
+
+            ApplyEquipSpell(spellInfo, item, true);
+        }
     }
 }
 
@@ -9229,7 +9372,10 @@ void Player::ApplyEquipSpell(SpellInfo const* spellInfo, Item* item, bool apply,
             }
         }
 
-        CastSpell(this, spellInfo->Id, item);
+        SpellCastResult const castResult = CastSpell(this, spellInfo->Id, item);
+        if (castResult != SPELL_CAST_OK)
+            TC_LOG_ERROR("spells", "Player::ApplyEquipSpell: {} ({}) equip spell {} of item {} was not applied: cast result {}",
+                GetName(), GetGUID().ToString(), spellInfo->Id, item ? item->GetEntry() : 0, uint32(castResult));
     }
     else
     {
@@ -9522,6 +9668,12 @@ void Player::CastItemCombatSpell(DamageInfo const& damageInfo, Item* item, ItemT
                 if (effectData->TriggerType != ITEM_SPELLTRIGGER_ON_PROC)
                     continue;
 
+                // Classic 1.60 (WoW Forever): in Cat or Bear Form only the paw's white swings roll the weapon's chance-on-hit spell; Cat Form
+                // specials rolled Rot-Covered Harpoon's Rot 0 times in 196 where 4.7 were expected (wowsims/forever, MIT, docs/evidence
+                // EV-0122)
+                if (damageInfo.GetSpellInfo() && IsInFeralForm())
+                    continue;
+
                 SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(effectData->SpellID, DIFFICULTY_NONE);
                 if (!spellInfo)
                 {
@@ -9628,8 +9780,17 @@ void Player::CastItemCombatSpell(DamageInfo const& damageInfo, Item* item, ItemT
             if (FindCurrentSpellBySpellId(5938) && e_slot == TEMP_ENCHANTMENT_SLOT)
                 chance = 100.0f;
 
+            // Classic 1.60 (WoW Forever): Shadow Oil (enchant 25, Shadow Bolt 350026) procs at its 15% at most once every 10 s, a cooldown
+            // the client states nowhere (wowsims/forever, MIT, docs/evidence EV-0016)
+            Milliseconds const classicEnchantCooldown = pEnchant->ID == 25 ? 10s : 0ms;
+            if (classicEnchantCooldown > 0ms && GetSpellHistory()->HasCooldown(spellInfo->Id))
+                continue;
+
             CombatEnchantProc::Dispatch(chance, [](float procChance) { return roll_chance(procChance); }, [&]
             {
+                if (classicEnchantCooldown > 0ms)
+                    GetSpellHistory()->AddCooldown(spellInfo->Id, 0, classicEnchantCooldown);
+
                 Unit* target = spellInfo->IsPositive() ? this : damageInfo.GetVictim();
 
                 CastSpellExtraArgs args(item);
@@ -11006,8 +11167,10 @@ bool Player::HasItemTotemCategory(uint32 TotemCategory) const
             return true;
     }
 
+    // Profession bags can also occupy the reagent bag slot immediately after the regular bags.
+    static_assert(uint8(INVENTORY_SLOT_BAG_END) == uint8(REAGENT_BAG_SLOT_START));
     Bag* bag;
-    for (uint8 i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i)
+    for (uint8 i = INVENTORY_SLOT_BAG_START; i < REAGENT_BAG_SLOT_END; ++i)
     {
         bag = GetBagByPos(i);
         if (bag)
@@ -12547,6 +12710,16 @@ Item* Player::EquipItem(uint16 pos, Item* pItem, bool update)
                 AddItemsSetItem(this, pItem);
 
             _ApplyItemMods(pItem, slot, true);
+
+            // Classic 1.60: a weapon put in a hand starts that hand's swing from the beginning (vanilla; live's main hand does this, and its
+            // off-hand starting at about 45% is reported as a bug: forever-bugs #126). Our timers kept running through the swap, so a swap
+            // right after a swing gave a free early swing with the new weapon.
+            if (pProto && pProto->GetClass() == ITEM_CLASS_WEAPON)
+            {
+                WeaponAttackType const attType = Player::GetAttackBySlot(slot, pProto->GetInventoryType());
+                if (attType != MAX_ATTACK)
+                    resetAttackTimer(attType);
+            }
 
             if (pProto && IsInCombat() && (pProto->GetClass() == ITEM_CLASS_WEAPON || pProto->GetInventoryType() == INVTYPE_RELIC) && m_weaponChangeTimer == 0)
             {
@@ -16298,6 +16471,7 @@ void Player::RewardQuest(Quest const* quest, LootItemType rewardType, uint32 rew
 
     SetQuestCompletedBit(quest_id, true);
 
+    uint64 objectiveMoneyPaid = 0;
     for (QuestObjective const& obj : quest->GetObjectives())
     {
         switch (obj.Type)
@@ -16312,6 +16486,10 @@ void Player::RewardQuest(Quest const* quest, LootItemType rewardType, uint32 rew
             }
             case QUEST_OBJECTIVE_CURRENCY:
                 RemoveCurrency(obj.ObjectID, obj.Amount, CurrencyDestroyReason::QuestTurnin);
+                break;
+            case QUEST_OBJECTIVE_MONEY:                     // pay-money objective (e.g. quest 97179): the money is spent on turn-in
+                ModifyMoney(-int64(obj.Amount));
+                objectiveMoneyPaid += uint64(obj.Amount);
                 break;
         }
     }
@@ -16442,7 +16620,9 @@ void Player::RewardQuest(Quest const* quest, LootItemType rewardType, uint32 rew
         moneyRew = int32(quest->GetRewMoneyMaxLevel() * sWorld->getRate(RATE_DROP_MONEY));
 
     moneyRew += GetQuestMoneyReward(quest);
-    moneyRew -= int32(quest->GetClassicRequiredMoney());    // Classic 1.60: vanilla quests that cost money
+    // Classic 1.60: vanilla quests that cost money. Not charged twice when the quest also has a money objective.
+    if (uint64 classicCost = quest->GetClassicRequiredMoney(); classicCost > objectiveMoneyPaid)
+        moneyRew -= int32(classicCost - objectiveMoneyPaid);
 
     if (moneyRew)
     {
@@ -19459,6 +19639,8 @@ bool Player::LoadFromDB(ObjectGuid guid, CharacterDatabaseQueryHolder const& hol
 
     // load achievements before anything else to prevent multiple gains for the same achievement/criteria on every loading (as loading does call UpdateCriteria)
     m_achievementMgr->LoadFromDB(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_ACHIEVEMENTS), holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_CRITERIA_PROGRESS));
+    // before the traits: the Legacy trait config counts the Legacy Points of the whole account
+    _LoadAccountLegacyAchievements(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_ACCOUNT_LEGACY_ACHIEVEMENTS));
     m_questObjectiveCriteriaMgr->LoadFromDB(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_QUEST_STATUS_OBJECTIVES_CRITERIA), holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_QUEST_STATUS_OBJECTIVES_CRITERIA_PROGRESS));
 
     SetMoney(std::min(fields.money, MAX_MONEY_AMOUNT));
@@ -19493,6 +19675,15 @@ bool Player::LoadFromDB(ObjectGuid guid, CharacterDatabaseQueryHolder const& hol
     ReplaceAllPlayerFlags(fields.playerFlags);
     ReplaceAllPlayerFlagsEx(fields.playerFlagsEx);
     SetWatchedFactionIndex(fields.watchedFaction);
+
+    // a choice the other choices rule out (Feather Color with Feathers: None, from before the client data paired them) is set to the
+    // allowed one and saved with the character, instead of refusing the login
+    if (GetSession()->NormalizeDependentChoices(Races(GetRace()), Classes(GetClass()), customizations))
+    {
+        TC_LOG_INFO("entities.player.loading", "Player::LoadFromDB: Player ({}) had customization choices its other choices rule out, set to the allowed ones",
+            guid.ToString());
+        SetCustomizations(Trinity::Containers::MakeIteratorPair(customizations.begin(), customizations.end()));
+    }
 
     if (!GetSession()->ValidateAppearance(Races(GetRace()), Classes(GetClass()), fields.gender, MakeChrCustomizationChoiceRange(customizations)))
     {
@@ -19962,6 +20153,8 @@ bool Player::LoadFromDB(ObjectGuid guid, CharacterDatabaseQueryHolder const& hol
     m_reputationMgr->LoadFromDB(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_REPUTATION));
 
     _LoadCharacterBankTabSettings(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_BANK_TAB_SETTINGS));
+
+    _LoadDayCycle(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_DAY_CYCLE));
 
     _LoadInventory(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_INVENTORY),
         holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_ARTIFACTS),
@@ -21694,6 +21887,42 @@ void Player::_LoadCharacterBankTabSettings(PreparedQueryResult result)
         AddDynamicUpdateFieldValue(m_values.ModifyValue(&Player::m_activePlayerData).ModifyValue(&UF::ActivePlayerData::CharacterBankTabSettings));
 }
 
+void Player::_LoadDayCycle(PreparedQueryResult result)
+{
+    m_skyMode = uint8(result ? DayCycle::SkyModeFromDb((*result)[0].GetUInt8()) : DayCycle::SkyMode::Auto);
+}
+
+// Classic 1.60: Legacy Points (trait currency 4225) come from challenges ("Reach level 25 for the first time on a Warrior"), which are
+// character achievements; the official realm counts them for the whole account. Only the achievements that are a source of Legacy
+// Points are kept, so no other achievement turns account-wide. A deleted character no longer counts (its row has no account).
+void Player::_LoadAccountLegacyAchievements(PreparedQueryResult result)
+{
+    static constexpr uint32 LegacyPointsTraitCurrencyID = 4225;
+
+    m_accountLegacyAchievements.clear();
+    if (!result)
+        return;
+
+    std::unordered_set<uint32> legacyChallenges;
+    for (TraitCurrencySourceEntry const* source : sTraitCurrencySourceStore)
+        if (source->TraitCurrencyID == LegacyPointsTraitCurrencyID && source->AchievementID)
+            legacyChallenges.insert(source->AchievementID);
+
+    do
+    {
+        Field* fields = result->Fetch();
+        uint32 const achievementId = fields[0].GetUInt32();
+        if (!legacyChallenges.contains(achievementId))
+            continue;
+
+        ObjectGuid const owner = ObjectGuid::Create<HighGuid::Player>(fields[1].GetUInt64());
+        time_t const date = time_t(fields[2].GetInt64());
+        auto [itr, added] = m_accountLegacyAchievements.try_emplace(achievementId, AccountLegacyAchievement{ owner, date });
+        if (!added && date < itr->second.Date)
+            itr->second = { owner, date };
+    } while (result->NextRow());
+}
+
 /*********************************************************/
 /***                   SAVE SYSTEM                     ***/
 /*********************************************************/
@@ -22359,6 +22588,7 @@ void Player::_SaveInventory(CharacterDatabaseTransaction trans)
         if (!item)
             continue;
 
+        RemoveItemFromUpdateQueueOf(item, this);
         Bag* container = item->GetContainer();
         if (item->GetState() != ITEM_REMOVED)
         {
@@ -25703,15 +25933,17 @@ void Player::ReportedAfkBy(Player* reporter)
     if (m_bgData.bgAfkReporter.find(reporter->GetGUID()) == m_bgData.bgAfkReporter.end() && !HasAura(43680) && !HasAura(43681) && reporter->CanReportAfkDueToLimit())
     {
         m_bgData.bgAfkReporter.insert(reporter->GetGUID());
+        // every accepted report is a success for the reporter (before, only the one that applied the debuff was, so the
+        // earlier reports were answered as failed), and the marks are counted before the list is cleared
+        reportAfkResult.NumBlackMarksOnOffender = uint8(m_bgData.bgAfkReporter.size());
+        reportAfkResult.NumPlayersIHaveReported = reporter->m_bgData.bgAfkReportedCount;
+        reportAfkResult.Result = WorldPackets::Battleground::ReportPvPPlayerAFKResult::PVP_REPORT_AFK_SUCCESS;
         // by default 3 players have to complain to apply debuff
         if (m_bgData.bgAfkReporter.size() >= sWorld->getIntConfig(CONFIG_BATTLEGROUND_REPORT_AFK))
         {
             // cast 'Idle' spell
             CastSpell(this, 43680, true);
             m_bgData.bgAfkReporter.clear();
-            reportAfkResult.NumBlackMarksOnOffender = m_bgData.bgAfkReporter.size();
-            reportAfkResult.NumPlayersIHaveReported = reporter->m_bgData.bgAfkReportedCount;
-            reportAfkResult.Result = WorldPackets::Battleground::ReportPvPPlayerAFKResult::PVP_REPORT_AFK_SUCCESS;
         }
     }
 
@@ -25784,6 +26016,93 @@ uint64 Player::GetStartMoney(uint8 race, uint8 playerClass)
 bool Player::HaveAtClient(BaseEntity const* u) const
 {
     return u == this || m_clientGUIDs.find(u->GetGUID()) != m_clientGUIDs.end();
+}
+
+void Player::RequestCombatNameplates(bool enabled, bool acknowledge)
+{
+    // Chat and prefix handlers run in the world session pass. Apply the last
+    // request and send its acknowledgement together on the player's map tick.
+    _combatNameplatesRequested = enabled;
+    _combatNameplateAckPending = acknowledge;
+}
+
+bool Player::HidesCombatNameplate(Unit const* unit) const
+{
+    return _combatNameplatesEnabled && _hiddenCombatNameplates.contains(unit->GetGUID());
+}
+
+bool Player::RefreshCombatNameplate(Unit const* unit, Pet const* pet)
+{
+    ObjectGuid const guid = unit->GetGUID();
+    if (!guid.IsCreatureOrVehicle())
+        return false;
+
+    auto engaged = [&guid](Unit const* participant)
+    {
+        auto const& refs = participant->GetCombatManager().GetPvECombatRefs();
+        auto it = refs.find(guid);
+        return it != refs.end() && !it->second->IsSuppressedFor(participant);
+    };
+
+    // Leave scripted show/hide flags, player-controlled units and friendly
+    // plates alone. IsValidAttackTarget also checks neutral, attackable NPCs.
+    // A dead hostile NPC is no longer a valid target, and the client then
+    // drew its plate as a large grey name over the corpse mid-fight: a
+    // corpse is out of every fight, so its plate is hidden too.
+    bool const hostile = unit->IsAlive() ? IsValidAttackTarget(unit) : !IsFriendlyTo(unit);
+    if (_combatNameplatesEnabled && !unit->IsControlledByPlayer() &&
+        !unit->HasUnitFlag(UNIT_FLAG_FORCE_NAMEPLATE) && !unit->HasUnitFlag3(UNIT_FLAG3_FORCE_HIDE_NAMEPLATE) &&
+        !engaged(this) && !(pet && engaged(pet)) && hostile)
+        return _hiddenCombatNameplates.insert(guid).second;
+
+    return _hiddenCombatNameplates.erase(guid) != 0;
+}
+
+void Player::UpdateCombatNameplates(uint32 elapsed)
+{
+    if (!_combatNameplatesEnabled && !_combatNameplatesRequested && !_combatNameplateAckPending)
+        return;
+
+    if (_combatNameplateTimer > elapsed)
+    {
+        _combatNameplateTimer -= elapsed;
+        return;
+    }
+    _combatNameplateTimer = 250;
+    _combatNameplatesEnabled = _combatNameplatesRequested;
+
+    // Selection, another player's fight and distance are not combat references.
+    // Recheck only this viewer's known creatures to catch pet replacement,
+    // charm, faction changes and threat suppression without altering the units.
+    UF::UnitData::Base unitMask;
+    unitMask.MarkChanged(&UF::UnitData::Flags3);
+    UpdateData updates(GetMapId());
+    Pet const* pet = _combatNameplatesEnabled ? GetPet() : nullptr;
+    for (ObjectGuid const& guid : m_clientGUIDs)
+    {
+        if (!guid.IsCreatureOrVehicle())
+            continue;
+        if (Creature* creature = ObjectAccessor::GetCreatureOrPetOrVehicle(*this, guid))
+            if (RefreshCombatNameplate(creature, pet))
+                creature->BuildValuesUpdateForPlayerWithMask(&updates, {}, unitMask.GetChangesMask(), this, false);
+    }
+    std::erase_if(_hiddenCombatNameplates, [this](ObjectGuid const& guid) { return !m_clientGUIDs.contains(guid); });
+    if (!_combatNameplatesEnabled)
+        _hiddenCombatNameplates.clear();
+
+    if (updates.HasData())
+    {
+        WorldPacket packet;
+        updates.BuildPacket(&packet);
+        SendDirectMessage(&packet);
+    }
+    if (_combatNameplateAckPending)
+    {
+        _combatNameplateAckPending = false;
+        TC_LOG_INFO("server.combatplates", "[combat_plates] {}: {} sent, prefix registered {}", GetSession()->GetPlayerInfo(),
+            _combatNameplatesEnabled ? "ACK ON" : "ACK OFF", GetSession()->IsAddonRegistered(CombatNameplatePrefix));
+        WhisperAddon(_combatNameplatesEnabled ? "ACK ON" : "ACK OFF", CombatNameplatePrefix, false, this);
+    }
 }
 
 bool Player::IsNeverVisibleFor(WorldObject const* seer, bool allowServersideObjects) const
@@ -25905,7 +26224,7 @@ inline void BeforeVisibilityDestroy<GameObject>(GameObject* t, Player* p)
 
 void Player::UpdateVisibilityOf(Trinity::IteratorPair<WorldObject**> targets)
 {
-    if (targets.begin() == targets.end())
+    if (targets.begin() == targets.end() || Trinity::HeadlessPackets::SkipVisibility(this))
         return;
 
     UpdateData udata(GetMapId());
@@ -25960,6 +26279,9 @@ void Player::UpdateVisibilityOf(Trinity::IteratorPair<WorldObject**> targets)
 
 void Player::UpdateVisibilityOf(WorldObject* target)
 {
+    if (Trinity::HeadlessPackets::SkipVisibility(this))
+        return;
+
     if (HaveAtClient(target))
     {
         if (!CanSeeOrDetect(target, { .DistanceCheck = true }))
@@ -25995,6 +26317,9 @@ void Player::UpdateVisibilityOf(WorldObject* target)
     {
         if (CanSeeOrDetect(target, { .DistanceCheck = true }))
         {
+            if (_combatNameplatesEnabled)
+                if (Creature* creature = target->ToCreature())
+                    RefreshCombatNameplate(creature, GetPet());
             target->SendUpdateToPlayer(this);
             m_clientGUIDs.insert(target->GetGUID());
 
@@ -26054,6 +26379,9 @@ void Player::UpdateTriggerVisibility()
 
 void Player::SendInitialVisiblePackets(WorldObject* target) const
 {
+    if (Trinity::HeadlessPackets::Skip(this))
+        return;
+
     auto sendVignette = [](Vignettes::VignetteData const& vignette, Player const* where)
     {
         if (!vignette.Data->IsInfiniteAOI() && Vignettes::CanSee(where, vignette))
@@ -26086,16 +26414,22 @@ void Player::SendInitialVisiblePackets(WorldObject* target) const
 template<class T>
 void Player::UpdateVisibilityOf(T* target, UpdateData& data, std::set<WorldObject*>& visibleNow)
 {
+    if (Trinity::HeadlessPackets::SkipVisibility(this))
+        return;
+
     if (HaveAtClient(target))
     {
         if (!CanSeeOrDetect(target, { .DistanceCheck = true }))
         {
             BeforeVisibilityDestroy<T>(target, this);
 
-            if (!target->IsDestroyedObject())
-                target->BuildOutOfRangeUpdateBlock(&data);
-            else
-                target->BuildDestroyUpdateBlock(&data);
+            if (!Trinity::HeadlessPackets::Skip(this))   // a bot has no client: only the guid list below changes
+            {
+                if (!target->IsDestroyedObject())
+                    target->BuildOutOfRangeUpdateBlock(&data);
+                else
+                    target->BuildDestroyUpdateBlock(&data);
+            }
 
             m_clientGUIDs.erase(target->GetGUID());
 
@@ -26108,9 +26442,15 @@ void Player::UpdateVisibilityOf(T* target, UpdateData& data, std::set<WorldObjec
     {
         if (CanSeeOrDetect(target, { .DistanceCheck = true }))
         {
-            target->BuildCreateUpdateBlockForPlayer(&data, this);
             m_clientGUIDs.insert(target->GetGUID());
-            visibleNow.insert(target);
+            if (!Trinity::HeadlessPackets::Skip(this))
+            {
+                if (_combatNameplatesEnabled)
+                    if (Creature* creature = target->ToCreature())
+                        RefreshCombatNameplate(creature, GetPet());
+                target->BuildCreateUpdateBlockForPlayer(&data, this);
+                visibleNow.insert(target);
+            }
 
             #ifdef TRINITY_DEBUG
                 TC_LOG_DEBUG("maps", "Object {} is visible now for player {}. Distance = {}", target->GetGUID().ToString(), GetGUID().ToString(), GetDistance(target));
@@ -26145,6 +26485,12 @@ void Player::UpdateObjectVisibility(bool forced)
 
 void Player::UpdateVisibilityForPlayer()
 {
+    if (Trinity::HeadlessPackets::SkipVisibility(this))
+    {
+        m_clientGUIDs.clear();   // a bot keeps no view; also drops what it held before the switch was turned on
+        return;
+    }
+
     // updates visibility of all objects around point of view for current player
     Trinity::VisibleNotifier notifier(*this);
     Cell::VisitAllObjects(m_seer, notifier, GetSightRange());
@@ -26324,14 +26670,7 @@ void Player::SendInitialPacketsBeforeAddToMap()
     m_questObjectiveCriteriaMgr->SendAllData(this);
 
     /// SMSG_LOGIN_SETTIMESPEED
-    static float const TimeSpeed = 0.01666667f;
-    WorldPackets::Misc::LoginSetTimeSpeed loginSetTimeSpeed;
-    loginSetTimeSpeed.NewSpeed = TimeSpeed;
-    loginSetTimeSpeed.GameTime = *GameTime::GetWowTime();
-    loginSetTimeSpeed.ServerTime = *GameTime::GetWowTime();
-    loginSetTimeSpeed.GameTimeHolidayOffset = 0; /// @todo
-    loginSetTimeSpeed.ServerTimeHolidayOffset = 0; /// @todo
-    SendDirectMessage(loginSetTimeSpeed.Write());
+    SendDayCycle();
 
     /// SMSG_WORLD_SERVER_INFO
     WorldPackets::Misc::WorldServerInfo worldServerInfo;
@@ -26380,6 +26719,96 @@ void Player::SendInitialPacketsBeforeAddToMap()
     SetMovedUnit(this);
 }
 
+// SMSG_LOGIN_SET_TIME_SPEED: sent at login and at every map change (SendInitialPacketsBeforeAddToMap), and by .time. The
+// realm's date and clock go as they are (ServerTime, and the date of GameTime: the calendar and holidays); only the hour
+// and minute of GameTime and the speed are the sky's.
+void Player::SendDayCycle() const
+{
+    WowTime const& now = *GameTime::GetWowTime();
+    // the realm's wall clock to the second (WowTime holds whole minutes, a minute that a fast sky would multiply)
+    int64 const localSeconds = int64(GameTime::GetGameTime())
+        + std::chrono::duration_cast<Seconds>(Trinity::Timezone::GetSystemZoneOffsetAt(GameTime::GetSystemTime())).count();
+    DayCycle::SkyClock const sky = DayCycle::ShownClock(localSeconds, sWorld->getIntConfig(CONFIG_FOREVER_DAY_CYCLE_SPEED), GetSkyMode());
+
+    WorldPackets::Misc::LoginSetTimeSpeed loginSetTimeSpeed;
+    loginSetTimeSpeed.NewSpeed = sky.Speed;
+    loginSetTimeSpeed.GameTime = now;
+    loginSetTimeSpeed.GameTime.SetHour(sky.Hour);
+    loginSetTimeSpeed.GameTime.SetMinute(sky.Minute);
+    loginSetTimeSpeed.ServerTime = now;
+    loginSetTimeSpeed.GameTimeHolidayOffset = 0; /// @todo
+    loginSetTimeSpeed.ServerTimeHolidayOffset = 0; /// @todo
+    SendDirectMessage(loginSetTimeSpeed.Write());
+}
+
+DayCycle::SkyMode Player::GetSkyMode() const
+{
+    return DayCycle::SkyModeFromDb(m_skyMode);
+}
+
+void Player::SetSkyMode(DayCycle::SkyMode mode)
+{
+    m_skyMode = uint8(mode);
+
+    CharacterDatabasePreparedStatement* stmt;
+    if (mode == DayCycle::SkyMode::Auto)
+    {
+        stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_CHARACTER_DAY_CYCLE);
+        stmt->setUInt64(0, GetGUID().GetCounter());
+    }
+    else
+    {
+        stmt = CharacterDatabase.GetPreparedStatement(CHAR_REP_CHARACTER_DAY_CYCLE);
+        stmt->setUInt64(0, GetGUID().GetCounter());
+        stmt->setUInt8(1, uint8(mode));
+    }
+    CharacterDatabase.Execute(stmt);
+
+    SendDayCycle();
+    if (IsInWorld())
+    {
+        SendSkyLights(true);
+        GetMap()->SendZoneLightOverrides(GetZoneId(), this);   // a zone's scripted light (an event darkening it) still wins
+    }
+}
+
+int32 Player::GetSkyOverrideLight(uint32 areaLightId) const
+{
+    if (!IsInWorld() || GetMap()->Instanceable())
+        return 0;
+
+    int32 const skyLight = DayCycle::OverrideLightFor(GetSkyMode());
+    if (!skyLight || !sLightStore.HasRecord(skyLight))
+        return 0;
+
+    LightEntry const* areaLight = sLightStore.LookupEntry(areaLightId);
+    if (!areaLight || areaLight->ContinentID != int32(GetMapId()) || int32(areaLightId) == skyLight)
+        return 0;
+
+    return skyLight;
+}
+
+void Player::SendSkyLights(bool restore /*= false*/)
+{
+    if (!IsInWorld() || GetMap()->Instanceable())
+        return;
+
+    if (!restore && DayCycle::OverrideLightFor(GetSkyMode()) == 0)
+        return;
+
+    for (LightEntry const* light : sLightStore)
+    {
+        if (light->ContinentID != int32(GetMapId()))
+            continue;
+
+        WorldPackets::Misc::OverrideLight overrideLight;
+        overrideLight.AreaLightID = light->ID;
+        overrideLight.OverrideLightID = GetSkyOverrideLight(light->ID);
+        overrideLight.TransitionMilliseconds = DayCycle::LightTransitionMs;
+        SendDirectMessage(overrideLight.Write());
+    }
+}
+
 void Player::SendInitialPacketsAfterAddToMap()
 {
     UpdateVisibilityForPlayer();
@@ -26400,6 +26829,7 @@ void Player::SendInitialPacketsAfterAddToMap()
     // update zone
     uint32 newzone, newarea;
     GetZoneAndAreaId(newzone, newarea);
+    SendSkyLights();                                         // before UpdateZone: the zone's scripted lights win
     UpdateZone(newzone, newarea);                            // also call SendInitWorldStates();
 
     GetSession()->SendLoadCUFProfiles();
@@ -27186,11 +27616,7 @@ float Player::GetReputationPriceDiscount(FactionTemplateEntry const* factionTemp
     if (!factionTemplate || !factionTemplate->Faction)
         return 1.0f;
 
-    ReputationRank rank = GetReputationRank(factionTemplate->Faction);
-    if (rank <= REP_NEUTRAL)
-        return 1.0f;
-
-    return 1.0f - 0.05f* (rank - REP_NEUTRAL);
+    return Trinity::Reputation::PriceFactor(GetReputationRank(factionTemplate->Faction));
 }
 
 Player* Player::GetTrader() const
@@ -28802,8 +29228,11 @@ void Player::_LoadSkills(PreparedQueryResult result)
         LearnSkillRewardedSpells(skillId, skillValue, race);
 
         // enable parent skill line if missing
+        // Classic 1.60: not from a profession child line (ParentTierIndex 4), that made every profession 300 at login; ranks come
+        // from the rank spells, as in SetSkill
         SkillLineEntry const* skillEntry = sSkillLineStore.LookupEntry(skillId);
-        if (skillEntry->ParentSkillLineID && skillEntry->ParentTierIndex > 0 && int32(GetSkillStep(skillEntry->ParentSkillLineID)) < skillEntry->ParentTierIndex)
+        if (skillEntry->ParentSkillLineID && skillEntry->ParentTierIndex > 0 && !IsClassicProfessionChildSkill(skillEntry)
+            && int32(GetSkillStep(skillEntry->ParentSkillLineID)) < skillEntry->ParentTierIndex)
             if (SkillRaceClassInfoEntry const* rcEntry = sDB2Manager.GetSkillRaceClassInfo(skillEntry->ParentSkillLineID, GetRace(), GetClass()))
                 if (SkillTiersEntry const* tier = sObjectMgr->GetSkillTier(rcEntry->SkillTierID))
                     SetSkill(skillEntry->ParentSkillLineID, skillEntry->ParentTierIndex, std::max<uint16>(GetPureSkillValue(skillEntry->ParentSkillLineID), 1), tier->GetValueForTierIndex(skillEntry->ParentTierIndex - 1));
@@ -28984,6 +29413,11 @@ std::vector<uint32> Player::GetCompletedAchievementIds() const
 bool Player::HasAchieved(uint32 achievementId) const
 {
     return m_achievementMgr->HasAchieved(achievementId);
+}
+
+bool Player::HasAchievedOnAccount(uint32 achievementId) const
+{
+    return HasAchieved(achievementId) || m_accountLegacyAchievements.contains(achievementId);
 }
 
 void Player::StartCriteria(CriteriaStartEvent startEvent, uint32 entry, Milliseconds timeLost/* = Milliseconds::zero()*/)
@@ -29498,6 +29932,22 @@ bool Player::IsPetNeedBeTemporaryUnsummoned() const
     return !IsInWorld() || !IsAlive() || HasUnitMovementFlag(MOVEMENTFLAG_FLYING) || HasUnitMovementFlag(MOVEMENTFLAG_ADV_FLYING);
 }
 
+bool Player::HasPendingTalkToObjective(uint32 creatureEntry) const
+{
+    for (QuestObjectiveStatusMap::value_type const& objectiveItr : Trinity::Containers::MapEqualRange(m_questObjectiveStatus, { QUEST_OBJECTIVE_TALKTO, int32(creatureEntry) }))
+    {
+        Quest const* quest = sObjectMgr->GetQuestTemplate(objectiveItr.second.QuestStatusItr->first);
+        QuestObjective const* objective = sObjectMgr->GetQuestObjective(objectiveItr.second.ObjectiveId);
+        if (!quest || !objective)
+            continue;
+
+        uint16 logSlot = objectiveItr.second.QuestStatusItr->second.Slot;
+        if (IsQuestObjectiveCompletable(logSlot, quest, *objective) && !IsQuestObjectiveComplete(logSlot, quest, *objective))
+            return true;
+    }
+    return false;
+}
+
 bool Player::CanSeeGossipOn(Creature const* creature) const
 {
     if (creature->HasNpcFlag(UNIT_NPC_FLAG_GOSSIP))
@@ -29505,6 +29955,12 @@ bool Player::CanSeeGossipOn(Creature const* creature) const
         if (GetGossipMenuForSource(creature))
             return true;
     }
+
+    // "talk to" objectives: an npc the player still has to speak with stays interactable even without a gossip menu or
+    // a quest of its own (Exploring the Alliance: Mekkatorque and Magni have neither, so the bubble was stripped and the
+    // objective could never be credited). HandleGossipHelloOpcode / HandleQuestgiverHelloOpcode give the credit.
+    if ((creature->HasNpcFlag(UNIT_NPC_FLAG_GOSSIP) || creature->HasNpcFlag(UNIT_NPC_FLAG_QUESTGIVER)) && HasPendingTalkToObjective(creature->GetEntry()))
+        return true;
 
     // for cases with questgiver/ender without gossip menus
     if (creature->HasNpcFlag(UNIT_NPC_FLAG_QUESTGIVER))
@@ -33314,6 +33770,11 @@ bool TraitMgr::PlayerDataAccessor::IsQuestRewarded(int32 questId) const
 bool TraitMgr::PlayerDataAccessor::HasAchieved(int32 achievementId) const
 {
     return _player->HasAchieved(achievementId);
+}
+
+bool TraitMgr::PlayerDataAccessor::HasAchievedOnAccount(int32 achievementId) const
+{
+    return _player->HasAchievedOnAccount(achievementId);
 }
 
 uint32 TraitMgr::PlayerDataAccessor::GetPrimarySpecialization() const

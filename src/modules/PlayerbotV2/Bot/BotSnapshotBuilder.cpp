@@ -27,6 +27,7 @@
 #include "Raid/RaidBrain.h"
 #include "Dungeon/DungeonScript.h"      // DungeonScriptMgr::GetScriptFor + event_summoned_bosses()
 #include "Player.h"
+#include "TemporarySummon.h"
 #include "PlayerbotAPI.h"         // IsItemRenderableInSlot (auto-equip candidate gate)
 #include "Formulas.h"                 // Trinity::XP::GetGrayLevel (Fix 2 trivial-quest gate)
 #include "Bot/World/MountsByRace.h"    // GroundMountSpellForRace — the racial mount wins an equal-speed pick
@@ -46,8 +47,10 @@
 #include "Log.h"
 #include "Loot.h"
 #include "Spell.h"
+#include "SmartScriptMgr.h"   // SelfAoeRadiusOfEntry: the casts of a creature's SmartAI script
 #include "SpellAuras.h"
 #include "SpellAuraDefines.h"
+#include "SpellAuraEffects.h"     // AuraEffect::GetMiscValue (Corrupted Mind lock)
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "SpellHistory.h"
@@ -688,8 +691,7 @@ void PopulateItemStatBlock(Player const* p, Item const* item, ItemStatBlock& out
     // in compact uint16 (caps DPS at 6553.5 — well above any TWW weapon).
     if (tmpl->GetClass() == ITEM_CLASS_WEAPON)
     {
-        const uint32 effective_ilvl = item->GetItemLevel(p);
-        const float dps = tmpl->GetDPS(effective_ilvl);
+        const float dps = item->GetClassicWeaponDPS(p);   // Classic 1.60: a reduced caster weapon's share, suffix included (EV-0097)
         if (dps > 0.f)
             out.weapon_dps_x10 = static_cast<uint16>(std::clamp<float>(dps * 10.f, 0.f, 65535.f));
     }
@@ -1446,7 +1448,10 @@ bool CachedLosCheck(Player const* p, Unit const* t, uint32 now_ms)
     // the two heads can still end in a branch or an overhang right above them. The Barrens near the Crossroads (Discord 2026-11-09,
     // mob 3632): bots 0.1 y from their target read "out of LoS", walked about six times looking for a clear spot, dropped the target
     // and took it again, round and round.
-    if (p->IsWithinMeleeRange(t))
+    // Only for a unit the bot can swing at. A friend is only ever the target of a spell, and a spell checks the real line: a healer
+    // 4.7 y from its tank read "in sight" through a wall the heals could not pass, so its sight step never ran, and 46 heals failed
+    // LINE_OF_SIGHT in 30 s while the tank died (lbrs_full af57, the tank from 51% to dead).
+    if (!p->IsFriendlyTo(t) && p->IsWithinMeleeRange(t))
         return true;
     struct LosEntry { uint32 at_ms; bool los; };
     thread_local std::unordered_map<uint64, LosEntry> s_losCache;
@@ -1697,6 +1702,193 @@ struct SnapRecyclePool
     }
 };
 
+// A RITUAL game object without an owner (Altar of the Keepers 130511 and Altar of Archaedas 133234 in Uldaman, the Blackrock Altar in
+// UBRS) fires its spell once `ritual.casters` different players of one group have used it. A person playing with bots cannot fill
+// the other places: the bots never used it, so Archaedas and the Stone Keepers never woke (Discord 1570946298532601866, 0.1.35).
+// True when a person in `p`'s group has used `go`, places are still open, and `p` is one of the group's bots picked to fill them.
+// Map update thread: the object is on the bot's map, so its user set is read on the thread that changes it.
+// A shut door a player opens by hand (NearbyObject::hand_door). The Deadmines Heavy Doors 17153 and 17154 stand shut (spawn state 1,
+// template startOpen 0) with lock 86, Quick Open asking for no skill: a player clicks them, nothing else opens them. Bot paths keep
+// clear of shut doors (PathGenerator::SetClosedDoorCheck), so the tank stood at each of them until the run stalled (deadmines_full
+// 19 Nov: 62 s at the door to Sneed, 120 s at the door to Gilnid). A door a boss, a lever or a script opens has no such lock case
+// (Factory, Mast Room and Foundry Door: lock 85, no key at all) or is locked or unselectable, and stays shut to the bots as to players.
+static bool IsShutHandDoor(GameObject const* go)
+{
+    if (go->GetGoType() != GAMEOBJECT_TYPE_DOOR || !go->isSpawned() || go->GetGoState() != GO_STATE_READY)
+        return false;
+    if (go->HasFlag(GameObjectFlags(GO_FLAG_IN_USE | GO_FLAG_LOCKED | GO_FLAG_INTERACT_COND | GO_FLAG_NOT_SELECTABLE)))
+        return false;
+    LockEntry const* lock = sLockStore.LookupEntry(go->GetGOInfo()->GetLockId());
+    if (!lock)
+        return false;
+    for (uint8 li = 0; li < MAX_LOCK_CASE; ++li)
+    {
+        if (lock->Type[li] != LOCK_KEY_SKILL || lock->Skill[li] != 0)
+            continue;
+        LockType const type = LockType(lock->Index[li]);
+        if ((type == LOCKTYPE_OPEN || type == LOCKTYPE_QUICK_OPEN || type == LOCKTYPE_OPEN_KNEELING) && SkillByLockType(type) == SKILL_NONE)
+            return true;
+    }
+    return false;
+}
+
+// A shut door the bot's dungeon names as opened by hand (DungeonScript::hand_doors: a door with no lock that players open, the Hall of
+// Thanes' Vault Door). Same state and flag tests as IsShutHandDoor; the dungeon's list stands in for the lock.
+static bool IsListedShutHandDoor(GameObject const* go)
+{
+    if (go->GetGoType() != GAMEOBJECT_TYPE_DOOR || !go->isSpawned() || go->GetGoState() != GO_STATE_READY)
+        return false;
+    if (go->HasFlag(GameObjectFlags(GO_FLAG_IN_USE | GO_FLAG_LOCKED | GO_FLAG_INTERACT_COND | GO_FLAG_NOT_SELECTABLE)))
+        return false;
+    Map const* map = go->GetMap();
+    if (!map || !map->IsDungeon())
+        return false;
+    DungeonScript const* ds = Services::Dungeons().GetScriptFor(map->GetId(), uint32(map->GetDifficultyID()));
+    if (!ds)
+        return false;
+    for (uint32_t e : ds->hand_doors())
+        if (e == go->GetEntry())
+            return true;
+    return false;
+}
+
+// A shut door that opens to a key `p` carries: the key's item entry, else 0. A player with the key right-clicks the door and the
+// client uses the key on it (its Opening spell, 3366, checks the lock against the key). The Gordok Courtyard Door (177219, lock 1563)
+// takes only the Gordok Courtyard Key, and the Gordok Inner Door (177217, lock 1564) the Inner Door Key from Guard Mol'dar: without
+// them the bots stood at Dire Maul North's courtyard for good. GO_FLAG_LOCKED is what such a door carries (the client asks for the
+// key), so it is not a refusal here; a door in use, unselectable or held by a condition stays shut, as in IsShutHandDoor.
+static uint32 KeyForShutDoor(Player const* p, GameObject const* go)
+{
+    if (go->GetGoType() != GAMEOBJECT_TYPE_DOOR || !go->isSpawned() || go->GetGoState() != GO_STATE_READY)
+        return 0;
+    if (go->HasFlag(GameObjectFlags(GO_FLAG_IN_USE | GO_FLAG_INTERACT_COND | GO_FLAG_NOT_SELECTABLE)))
+        return 0;
+    LockEntry const* lock = sLockStore.LookupEntry(go->GetGOInfo()->GetLockId());
+    if (!lock)
+        return 0;
+    for (uint8 li = 0; li < MAX_LOCK_CASE; ++li)
+        if (lock->Type[li] == LOCK_KEY_ITEM && lock->Index[li] > 0 && p->HasItemCount(uint32(lock->Index[li]), 1))
+            return uint32(lock->Index[li]);
+    return 0;
+}
+
+// A chest the bot's dungeon lists as holding a door key (DungeonScript::key_chests: Fengus's Chest in Dire Maul North), spawned and
+// not yet opened.
+static bool IsListedKeyChest(Player const* p, GameObject const* go)
+{
+    if (go->GetGoType() != GAMEOBJECT_TYPE_CHEST || !go->isSpawned() || go->getLootState() != GO_READY)
+        return false;
+    Map const* map = p->GetMap();
+    if (!map || !map->IsDungeon())
+        return false;
+    DungeonScript const* ds = Services::Dungeons().GetScriptFor(p->GetMapId(), uint32(map->GetDifficultyID()));
+    if (!ds)
+        return false;
+    for (uint32_t e : ds->key_chests())
+        if (e == go->GetEntry())
+            return true;
+    return false;
+}
+
+// The radius of the widest harmful spell a creature casts on every enemy around itself (Frost Nova, Thunderclap, Arcane
+// Explosion: an effect on TARGET_UNIT_SRC_AREA_ENEMY from the caster's own spot), 0 when it has none. NearbyUnit::self_aoe_radius.
+// rol_full af52 (20 Nov): The Abandoned's Frost Nova (14907) froze and hit the whole party, the healer 3 y from the tank, and the
+// healer died. Read from the creature's spell list (creature_template_spell) and the casts of its SmartAI script, the two places a
+// creature's spells are written as data; a script's own C++ casts are not known until it casts one (NearbyUnit::casting_spell_id,
+// SelfAoeRadiusOfSpell). Cached per entry: both are load-time data. Radii under 4 y (a melee swipe) or over 20 y (the whole room,
+// nowhere to step to) are left out.
+static float SelfAoeRadiusOfSpell(uint32 spell_id)
+{
+    SpellInfo const* si = spell_id ? sSpellMgr->GetSpellInfo(spell_id, DIFFICULTY_NONE) : nullptr;
+    if (!si || si->IsPositive())
+        return 0.f;
+    float best = 0.f;
+    for (SpellEffectInfo const& eff : si->GetEffects())
+    {
+        if (!eff.IsEffect() || si->IsPositiveEffect(eff.EffectIndex))
+            continue;
+        SpellRadiusEntry const* re = nullptr;
+        if (eff.TargetA.GetTarget() == TARGET_UNIT_SRC_AREA_ENEMY ||
+            (eff.TargetA.GetTarget() == TARGET_SRC_CASTER && eff.TargetB.GetTarget() == TARGET_UNIT_SRC_AREA_ENEMY))
+            re = eff.TargetB.GetTarget() == TARGET_UNIT_SRC_AREA_ENEMY && eff.TargetBRadiusEntry ? eff.TargetBRadiusEntry : eff.TargetARadiusEntry;
+        if (!re)
+            continue;
+        float const r = re->Radius > 0.f ? re->Radius : re->RadiusMax;
+        if (r >= 4.f && r <= 20.f)
+            best = std::max(best, r);
+    }
+    return best;
+}
+
+static float SelfAoeRadiusOfEntry(Creature const* c)
+{
+    static std::mutex s_mutex;
+    static std::unordered_map<uint32, float> s_cache;
+    uint32 const entry = c->GetEntry();
+    {
+        std::lock_guard<std::mutex> lock(s_mutex);
+        if (auto it = s_cache.find(entry); it != s_cache.end())
+            return it->second;
+    }
+    float best = 0.f;
+    if (CreatureTemplate const* ct = c->GetCreatureTemplate())
+        for (uint32 spell : ct->spells)
+            best = std::max(best, SelfAoeRadiusOfSpell(spell));
+    for (SmartScriptHolder const& h : sSmartScriptMgr->GetScript(int32(entry), SMART_SCRIPT_TYPE_CREATURE))
+        if (h.action.type == SMART_ACTION_CAST || h.action.type == SMART_ACTION_SELF_CAST || h.action.type == SMART_ACTION_INVOKER_CAST)
+            best = std::max(best, SelfAoeRadiusOfSpell(h.action.cast.spell));
+    std::lock_guard<std::mutex> lock(s_mutex);
+    s_cache.emplace(entry, best);
+    return best;
+}
+
+static bool RitualNeedsBot(Player const* p, GameObject const* go)
+{
+    GameObjectTemplate const* info = go->GetGOInfo();
+    if (!info || !go->GetOwnerGUID().IsEmpty() || info->ritual.casters < 2)
+        return false;   // a warlock's summoning portal (owned) is the warlock's call; one-user rituals need nobody
+    uint32 const used = go->GetUniqueUseCount();
+    if (used == 0 || used >= info->ritual.casters || go->IsUniqueUser(p->GetGUID()) || p->IsInCombat() || !p->IsAlive())
+        return false;
+    Group const* g = p->GetGroup();
+    if (!g)
+        return false;
+    bool person_started = false;
+    for (ObjectGuid const& user : go->GetUniqueUsers())
+    {
+        Player const* u = ObjectAccessor::GetPlayer(*go, user);
+        if (u && Scenario::PlaysAsHuman(u) && g->IsMember(user))
+        {
+            person_started = true;
+            break;
+        }
+    }
+    if (!person_started)
+        return false;
+    // The group's bots within reach that could fill a place, in guid order: every bot of the group computes the same order, so
+    // exactly the missing number go. Not by distance - the bots following the person keep moving, and a pick that changed with
+    // their steps would send a second bot for a place the first is already walking to. A bot that has used it leaves the list
+    // and the open count drops by one with it.
+    constexpr float kReach = 30.0f;
+    std::vector<ObjectGuid::LowType> candidates;
+    for (GroupReference const& ref : g->GetMembers())
+    {
+        Player const* m = ref.GetSource();
+        if (!m || m->GetMap() != go->GetMap() || Scenario::PlaysAsHuman(m) || !m->IsAlive() || m->IsInCombat()
+            || go->IsUniqueUser(m->GetGUID()))
+            continue;
+        if (m->GetExactDist(go) > kReach)
+            continue;
+        candidates.push_back(m->GetGUID().GetCounter());
+    }
+    std::sort(candidates.begin(), candidates.end());
+    uint32 const open = info->ritual.casters - used;
+    for (uint32 i = 0; i < candidates.size() && i < open; ++i)
+        if (candidates[i] == p->GetGUID().GetCounter())
+            return true;
+    return false;
+}
+
 SnapRecyclePool& RecyclePool()
 {
     // thread_local — one pool per worker thread (and the world thread when
@@ -1761,6 +1953,12 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
     // The wider value is truncated into uint8 because spec IDs <= 256 today;
     // when Blizzard expands beyond that we'll widen the field.
     snap->identity.spec    = ::Playerbot::Classic::EffectiveSpecId(p);
+    // A Feral druid (103, the cat) that has no Cat Form yet plays the bear (104): Forever teaches Cat Form only with the Great Cat Spirit
+    // quests at 20 (spell 1309050), Bear Form with Body and Heart at 10. The cat rotation without Cat Form cancelled Bear Form as the
+    // "wrong form" and the druid fought in caster form (DoctorSun, Discord 2026-11-17: low-level feral bots would not tank in form until
+    // forced into it with .aura 5487). Only the rotation, forms and role follow; the talent build and the gear keep the Feral spec.
+    if (::Playerbot::IsVanillaRealm() && p->GetClass() == CLASS_DRUID && snap->identity.spec == 103 && !p->HasSpell(768) && p->HasSpell(5487))
+        snap->identity.spec = 104;
 
     // Infer role from (class, spec). Single source of truth lives in
     // Bot/ClassTables.cpp (IsTankSpec/IsHealerSpec) — also used by
@@ -1935,15 +2133,13 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
                 {}, &ld)
             : ZLiquidStatus(0);
         const bool in_liquid = (liquid & (LIQUID_MAP_IN_WATER | LIQUID_MAP_UNDER_WATER)) != 0;
-        const bool is_magma = (ld.type_flags & map_liquidHeaderTypeFlags::Magma) != map_liquidHeaderTypeFlags::NoWater;
-        const bool is_slime = (ld.type_flags & map_liquidHeaderTypeFlags::Slime) != map_liquidHeaderTypeFlags::NoWater;
-        // Underwater (water-specific) only when the head is submerged AND
-        // the liquid is real water — not magma. A naked bot in lava also
-        // has feet wet, but it's burning, not drowning.
-        snap->environment.is_underwater = (liquid & LIQUID_MAP_UNDER_WATER) != 0
-                            && !is_magma && !is_slime;
+        const bool hurts = BotMovement::LiquidHurts(ld, liquid);
+        // Underwater (drowning) only when the head is submerged in a liquid
+        // that does not hurt. A naked bot in lava also has feet wet, but
+        // it's burning, not drowning.
+        snap->environment.is_underwater = (liquid & LIQUID_MAP_UNDER_WATER) != 0 && !hurts;
         // The core burns on any contact, floor within a tenth of the surface included (WATER_WALK): the Majordomo dais.
-        snap->environment.is_in_damaging_liquid = (liquid & MAP_LIQUID_STATUS_IN_CONTACT) != 0 && (is_magma || is_slime);
+        snap->environment.is_in_damaging_liquid = (liquid & MAP_LIQUID_STATUS_IN_CONTACT) != 0 && hurts;
         if (snap->environment.is_underwater && lqmap)
             snap->environment.water_surface_z = lqmap->GetWaterLevel(
                 p->GetPhaseShift(), p->GetPositionX(), p->GetPositionY());
@@ -1951,21 +2147,44 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
             snap->environment.water_surface_z = 0.0f;
 
         // Open-world water-escape FOCUS target (FIX #12). When the bot is in real
-        // swim-water (not magma/slime), resolve the nearest DRY navmesh footing
+        // swim-water (a liquid that does not hurt), resolve the nearest DRY navmesh footing
         // so idle:water_escape can drive straight to it and PREEMPT all other
         // movement until the bot is on land — breaking the Stormwind-harbor
         // oscillation where the water-exit recovery pulls the bot to shore while
         // travel/wander immediately walk it back in. NearestNavPoint excludes
         // water/magma (dry footing only) and is SEH-guarded for the world thread;
         // gated on in-water so only swimming bots pay the navmesh query.
+        //
+        // The same point is the way out of a liquid that burns (tar, lava, slime with a spell): idle:flee_damaging_liquid and the
+        // combat step-out walk to it. Their old random 25 y heading from the middle of the Tar Pits ended in tar again, the move gate
+        // refused it as Magma, and the rogue of shapers_full af51 stayed in the tar until she died (20 Nov). The ground polys
+        // (NearestNavPoint's filter) stop at the liquid's edge, so the nearest one is the nearest bank; a point that still reads
+        // as burning liquid (the edge of a poly under the surface) is carried 3 y further out, away from the bot, and snapped again.
         snap->environment.water_escape_valid = false;
-        if (in_liquid && !is_magma && !is_slime)
+        if ((in_liquid && !hurts) || snap->environment.is_in_damaging_liquid)
         {
             Position exit{};
             if (Playerbot::BotMovement::NearestNavPoint(
                     const_cast<Player*>(p), p->GetPositionX(), p->GetPositionY(),
                     p->GetPositionZ(), /*hxy*/ 60.0f, /*hz*/ 25.0f, exit))
             {
+                if (snap->environment.is_in_damaging_liquid && lqmap)
+                {
+                    LiquidData eld{};
+                    ZLiquidStatus const est = lqmap->GetLiquidStatus(p->GetPhaseShift(), exit.GetPositionX(), exit.GetPositionY(),
+                                                                     exit.GetPositionZ(), {}, &eld);
+                    if ((est & MAP_LIQUID_STATUS_IN_CONTACT) != 0 && BotMovement::LiquidHurts(eld, est))
+                    {
+                        float const ox = exit.GetPositionX() - p->GetPositionX();
+                        float const oy = exit.GetPositionY() - p->GetPositionY();
+                        float const od = std::sqrt(ox * ox + oy * oy);
+                        Position further{};
+                        if (od > 0.1f && Playerbot::BotMovement::NearestNavPoint(const_cast<Player*>(p),
+                                exit.GetPositionX() + ox / od * 3.0f, exit.GetPositionY() + oy / od * 3.0f, exit.GetPositionZ(),
+                                /*hxy*/ 3.0f, /*hz*/ 6.0f, further))
+                            exit = further;
+                    }
+                }
                 // Require a real exit, not the bot's own (submerged) spot.
                 const float ex = exit.GetPositionX() - p->GetPositionX();
                 const float ey = exit.GetPositionY() - p->GetPositionY();
@@ -2050,6 +2269,10 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
                         }
                     }
                     if (!is_mount) continue;
+                    // Another race's mount is not ridden: mounts are account-wide, so a pool bot knows those of every race its account
+                    // played (energetik 19 Nov: an orc on a human's horse, a tauren on a night elf's tiger, an undead on a gnome's
+                    // mechanostrider).
+                    if (!::Playerbot::API::RacePermitsMount(p->GetRace(), sid)) continue;
                     // A mount whose model the client cannot draw is not a mount: the bot would move at mount speed looking on foot.
                     // One line per spell says what was wrong (the first time it is seen).
                     uint32 mount_display = 0;
@@ -2191,6 +2414,11 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
     snap->vitals.is_feared   = p->HasUnitState(UNIT_STATE_FLEEING);
     snap->vitals.is_confused = p->HasUnitState(UNIT_STATE_CONFUSED);
     snap->vitals.is_silenced = p->HasAuraType(SPELL_AURA_MOD_SILENCE);
+    snap->vitals.heals_locked = false;
+    for (AuraEffect const* aurEff : p->GetAuraEffectsByType(SPELL_AURA_OVERRIDE_CLASS_SCRIPTS))
+        if (aurEff->GetMiscValue() == 4327)
+            snap->vitals.heals_locked = true;
+    snap->vitals.heal_lock_armed = p->HasAura(29185) || p->HasAura(29194) || p->HasAura(29196) || p->HasAura(29198);
     snap->vitals.is_pvp       = p->IsPvP();
     snap->vitals.is_ffa_pvp   = p->IsFFAPvP();
     snap->vitals.pvp_wanted   = p->HasPlayerFlag(PLAYER_FLAGS_IN_PVP);
@@ -2441,7 +2669,12 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
             std::string name;
             if (sCharacterCache->GetCharacterNameByGuid(owner_guid, name))
                 snap->owner_name = std::move(name);
+            Player const* owner = snap->guild.has_invite ? ObjectAccessor::FindConnectedPlayer(owner_guid) : nullptr;
+            snap->guild.invite_to_owner_guild = owner && owner->GetGuildId() != 0 && owner->GetGuildId() == snap->guild.invite_id;
         }
+        else
+            snap->guild.invite_to_owner_guild = false;
+        snap->guild.invite_bot_owned = snap->guild.has_invite && Services::Owners().GetOwner(snap->bot_id).account_id != 0;
     }
     if (bot_ai)
     {
@@ -2841,8 +3074,19 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
             snap->social_events.group_invite_leader_level   = leader->GetLevel();
             snap->social_events.group_invite_leader_is_real = !(leader->GetSession() && leader->GetSession()->IsBot());
             if (WorldSession const* ls = leader->GetSession(); ls && !ls->IsBot())
+            {
                 snap->social_events.group_invite_leader_privileged =
                     ls->GetSecurity() >= SEC_GAMEMASTER || !Services::Owners().BotsOwnedBy(ls->GetAccountId()).empty();
+                uint32 const owner_account = Services::Owners().GetOwner(snap->bot_id).account_id;
+                snap->social_events.group_invite_leader_owner = owner_account != 0 && owner_account == ls->GetAccountId();
+                snap->social_events.group_invite_bot_owned = owner_account != 0;
+                snap->social_events.group_invite_leader_gm = ls->GetSecurity() >= SEC_GAMEMASTER;
+                // The bot's own friend list only, as for the duel friend flag above: this may run on a snapshot worker, and the player's
+                // list is his session's to change at any moment. HasFriend does not change the list (TC's declaration is not const).
+                if (PlayerSocial* social = const_cast<Player*>(p)->GetSocial())
+                    snap->social_events.group_invite_leader_friend = social->HasFriend(leader->GetGUID());
+                snap->social_events.group_invite_leader_guildmate = p->GetGuildId() != 0 && p->GetGuildId() == leader->GetGuildId();
+            }
         }
     }
     // Skip a dead victim — Player::GetVictim() can stay set for a tick after
@@ -3367,27 +3611,28 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
         for (auto const& it : snap->inventory.bag_items)
         {
             if (it.equip_slot == 0xFF) continue;
-            // Mirror the auto-equip rule's Prot-warrior/paladin weapon exclusion
-            // (State_Idle dungeon_auto_equip / MaintainAutoEquipUpgrades): for
-            // spec 73 (Prot Warrior) / 66 (Prot Paladin) the mainhand + offhand
-            // are owned EXCLUSIVELY by EnsureShieldTankWeapon (the 1H+shield
-            // backfill). The score-based rule NEVER swaps those two slots — a
-            // higher-score 2H would evict the shield and churn 2H<->1H+shield —
-            // so a bag weapon that out-scores the equipped 1H is a PERMANENT
-            // non-upgrade here. Counting it reported a "pending upgrade" that can
-            // never apply: the false 6-pending seen on Prot tanks (owner-flagged
-            // 2026-07-01, the classic offhand-vs-2H false alarm). Exclude them so
-            // this count and the rule agree, as this block's header promises.
-            if ((snap->identity.spec == 73 || snap->identity.spec == 66) &&
-                (it.equip_slot == EQUIPMENT_SLOT_MAINHAND ||
-                 it.equip_slot == EQUIPMENT_SLOT_OFFHAND))
-                continue;
+            // Mirror the auto-equip rules' slot filter (Gear::AutoEquipSlot): a shield
+            // tank (spec 73 Prot Warrior / 66 Prot Paladin) takes only a one-hander in
+            // the main hand and a shield in the off hand there, since a 2H or an
+            // off-hand weapon would churn against EnsureShieldTankWeapon; never a
+            // fishing pole. Counting a weapon the rules never wear reported a
+            // "pending upgrade" that can never apply (the false 6-pending on Prot
+            // tanks, owner-flagged 2026-07-01), so this count and the rules agree.
+            uint8 const dst = ::Playerbot::V2::Gear::AutoEquipSlot(uint16(snap->identity.spec), it.equip_slot, it.entry);
+            if (dst == 0xFF) continue;
             // Defense-in-depth: equip_slot is clamped to <19 at capture, but
             // an OOB read of equipped[19] here is UB — never index past it.
-            if (it.equip_slot >= snap->inventory.equipped.size()) continue;
+            if (dst >= snap->inventory.equipped.size()) continue;
             if (it.item_level == 0)    continue;
             if (it.quality == 0)       continue;   // skip POOR
-            EquippedItem const& cur = snap->inventory.equipped[it.equip_slot];
+            EquippedItem const& cur = snap->inventory.equipped[dst];
+            uint32 const cur_entry = ::Playerbot::V2::Gear::IsFishingPole(cur.entry) ? 0u : cur.entry;   // a fishing pole is no weapon
+            // A shield tank's shield over a weapon in the off hand is pending whatever the scores, as the rules wear it.
+            if (::Playerbot::V2::Gear::ShieldGoesOnShieldTank(uint16(snap->identity.spec), dst, it.entry, cur_entry))
+            {
+                ++cnt;
+                continue;
+            }
             // Score-based upgrade test (was pure item_level, which tied — and so
             // refused — quest greens vs starter whites once 12.0 scaling floored
             // both to the same effective ilvl). The stat allocation breaks the tie.
@@ -3395,14 +3640,16 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
             if (::Playerbot::V2::Gear::RaidGearActive(snap->identity.level))
             {
                 auto const& eq = snap->inventory.equipped;
-                if (!::Playerbot::V2::Gear::RaidEquipUpgrade(snap->identity.cls, uint16(snap->identity.spec), snap->identity.level, it.equip_slot,
-                                            it.entry, cur.entry, eq[EQUIPMENT_SLOT_MAINHAND].entry, eq[EQUIPMENT_SLOT_OFFHAND].entry,
+                if (!::Playerbot::V2::Gear::RaidEquipUpgrade(snap->identity.cls, uint16(snap->identity.spec), snap->identity.level, dst,
+                                            it.entry, cur_entry, eq[EQUIPMENT_SLOT_MAINHAND].entry, eq[EQUIPMENT_SLOT_OFFHAND].entry,
                                             snap->owner_guid.IsEmpty(), snap->guid.GetCounter()))
                     continue;
             }
-            else if (cur.entry != 0 &&
-                EquipFitScore(it.stats, it.item_level, snap->stat_weights) <=
-                EquipFitScore(cur.stats, cur.item_level, snap->stat_weights))
+            else if (cur_entry != 0 &&
+                EquipFitScore(it.stats, it.item_level, snap->stat_weights) *
+                    ::Playerbot::V2::Gear::LevellingArmorFactor(it.entry, snap->identity.cls, uint16(snap->identity.spec), snap->identity.level) <=
+                EquipFitScore(cur.stats, cur.item_level, snap->stat_weights) *
+                    ::Playerbot::V2::Gear::LevellingArmorFactor(cur_entry, snap->identity.cls, uint16(snap->identity.spec), snap->identity.level))
                 continue;
             ++cnt;
         }
@@ -3416,7 +3663,11 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
         snap->owner_in_group = !snap->owner_guid.IsEmpty() && g->IsMember(snap->owner_guid);
         // No owner in this group: a human member still commands the bot (GroupControl.h). A world bot a player invited gets the
         // companion's duties and obeys the group leader; a bot with only bots around it stays autonomous.
-        if (!snap->owner_in_group && Services::Initialized())
+        // A self bot (the bot logic driving a character its player is logged in on) that leads the group answers to no one: its player
+        // is the leader. Resolving a controller made the first other human member "lead" it, so it looted as a led bot (only its own
+        // quest items) and left every corpse of a party with a friend in it (selfbot-loot af56 check, 2026-11-21).
+        bool const self_bot_leads = g->GetLeaderGUID() == p->GetGUID() && Scenario::PlaysAsHuman(p);
+        if (!snap->owner_in_group && !self_bot_leads && Services::Initialized())
         {
             std::vector<GroupControl::Member<ObjectGuid>> members;
             for (GroupReference const& itr : g->GetMembers())
@@ -4027,10 +4278,88 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
                 snap->combat.group_tank = mp->GetGUID();
         }
     }
+    // Healer victim seeding. A grouped healer never opens on a mob itself (State_InCombat holds it at combat:raid_healer_hold in a
+    // dungeon or raid, and BotCommandParser gives it no engage order on Attack), so it had no victim and every damage rule of its
+    // rotation (wand, Smite, Wrath, Lightning Bolt, Judgement; all gated on HasLiveTarget) stood idle while the group was healthy:
+    // voldemargreed, SFK 2026-11-13, "healers just stand around waiting for someone's health to drop". The seed took only the tank's
+    // victim and only in an instance, so a healer questing with its player hit only what was hitting it, even on Attack (VempirE,
+    // #bot-feedback 2026-11-20). With no victim it now takes the group's target (GroupFight::HealerFillerTarget): the human leader's
+    // target in the group's fight, else the tank's victim. No Attack, no chase: only the target its ranged rules aim at
+    // (CombatTargetsState::victim_group_target). Heals keep their own targets and their priority (the damage rules wait until everyone
+    // is above 90 %).
+    // Never one the raid brain forbids this bot: the raid order's drop of a forbidden victim cannot drop a seeded one, and it took the
+    // healer's every tick (aq40_twins af52 1120: the healers were seeded Vek'nilash, whom spells cannot hurt, and stood at
+    // "raid:drop_target" for the first 30 s with 12 of 12 at full mana while the tanks went from 100% to 11%).
+    auto raidForbids = [&](ObjectGuid g)
+    {
+        if (!Services::Initialized())
+            return false;
+        RaidOrder const* rord = Raid::GetBrain().OrderFor(p->GetGUID().GetCounter());
+        return rord && std::find(rord->forbidden_targets.begin(), rord->forbidden_targets.end(), g) != rord->forbidden_targets.end();
+    };
+    if (snap->combat.victim.IsEmpty() && !p->GetMap()->IsBattlegroundOrArena())
+    {
+        Role const role = (bot_ai && bot_ai->role_override() != Role::Unknown) ? bot_ai->role_override() : snap->group.my_role;
+        if (role == Role::Healer)
+        {
+            auto fit = [&](Unit const* mob)
+            {
+                return mob && mob->IsAlive() && mob->IsInMap(p) && mob->IsInCombat() && p->IsValidAttackTarget(mob)
+                    && !mob->HasBreakableByDamageCrowdControlAura() && !raidForbids(mob->GetGUID());
+            };
+            Unit const* tank_mob = nullptr;
+            if (!snap->combat.group_tank.IsEmpty() && snap->combat.group_tank != p->GetGUID())
+                if (Player const* tank = ObjectAccessor::GetPlayer(*p, snap->combat.group_tank))
+                    tank_mob = tank->GetVictim();
+            if (!fit(tank_mob))
+                tank_mob = nullptr;
+            // The human leader: the owner in this group, else the player who commands it (GroupControl::ResolveController above).
+            ObjectGuid const leader_guid = snap->owner_in_group ? snap->owner_guid : snap->led_by_player ? snap->controller_guid : ObjectGuid::Empty;
+            Unit const* leader_mob = nullptr;
+            if (!leader_guid.IsEmpty() && leader_guid != p->GetGUID())
+                if (Player const* leader = ObjectAccessor::GetPlayer(*p, leader_guid);
+                    leader && leader->IsInCombat() && p->IsWithinDist(leader, GroupFight::kGroupFightYd))
+                {
+                    // A caster leader has no melee victim: its hostile selection is the target it fights.
+                    leader_mob = leader->GetVictim();
+                    if (!leader_mob)
+                        leader_mob = ObjectAccessor::GetUnit(*leader, leader->GetTarget());
+                    if (!fit(leader_mob))
+                        leader_mob = nullptr;
+                }
+            GroupFight::HealerTarget const pick = GroupFight::HealerFillerTarget(false, bot_ai && bot_ai->group_fight(), p->IsInCombat(),
+                                                                                 leader_mob != nullptr, tank_mob != nullptr);
+            Unit const* mob = pick == GroupFight::HealerTarget::Leader ? leader_mob : pick == GroupFight::HealerTarget::Tank ? tank_mob : nullptr;
+            if (mob)
+            {
+                snap->combat.victim = mob->GetGUID();
+                snap->combat.victim_group_target = true;
+                snap->combat.victim_pos_known = true;
+                snap->combat.victim_x = mob->GetPositionX();
+                snap->combat.victim_y = mob->GetPositionY();
+                snap->combat.victim_z = mob->GetPositionZ();
+                snap->combat.victim_reach = mob->GetCombatReach();
+            }
+        }
+    }
+    // Whether the victim stands in a liquid that would burn the bot there (CombatTargetsState::victim_in_damaging_liquid): the same probe
+    // as the bot's own is_in_damaging_liquid, at the victim's spot.
+    if (snap->combat.victim_pos_known)
+        if (Map* vmap = p->GetMap())
+        {
+            LiquidData vld{};
+            ZLiquidStatus const vst = vmap->GetLiquidStatus(p->GetPhaseShift(), snap->combat.victim_x, snap->combat.victim_y,
+                                                            snap->combat.victim_z, {}, &vld);
+            snap->combat.victim_in_damaging_liquid = (vst & MAP_LIQUID_STATUS_IN_CONTACT) != 0 && BotMovement::LiquidHurts(vld, vst);
+        }
     Pet const* threat_pet = p->GetPet();
     auto fill_threat = [&](NearbyUnit& u, Unit* t)
     {
         u.unit_in_combat  = t->IsInCombat();
+        if (Creature const* tc = t->ToCreature())
+            u.self_aoe_radius = std::max(SelfAoeRadiusOfEntry(tc),
+                                         t->IsNonMeleeSpellCast(false) && t->GetCurrentSpell(CURRENT_GENERIC_SPELL)
+                                             ? SelfAoeRadiusOfSpell(t->GetCurrentSpell(CURRENT_GENERIC_SPELL)->GetSpellInfo()->Id) : 0.f);
         u.has_threat_list = t->CanHaveThreatList();
         // Stun immunity (bear Bash in the interrupt rotation): a mechanic
         // immunity to stuns (creature template immunities / immunity auras)
@@ -4504,7 +4833,11 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
         snap->auras.own_auras_index.push(snap->auras.own_auras[i].spell_id, i);
     snap->auras.own_auras_index.finalize();
 
+    // The snapshot's victim, not only the melee one: a seeded victim (a ranged attacker's selection, a healer's tank target, above)
+    // needs its auras too, or "is my Shadow Word: Pain on it" read no and the dot was cast again every tick.
     Unit* victim = p->GetVictim();
+    if (!snap->combat.victim.IsEmpty() && (!victim || victim->GetGUID() != snap->combat.victim))
+        victim = ObjectAccessor::GetUnit(*p, snap->combat.victim);
     Unit* tu = nullptr;
     if (!snap->combat.current_target.IsEmpty() && snap->combat.current_target != snap->guid)
         tu = ObjectAccessor::GetUnit(*p, snap->combat.current_target);
@@ -4741,6 +5074,9 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
             NearbyUnit u{};
             u.guid   = t->GetGUID();
             u.player_owned = t->GetTypeId() != TYPEID_PLAYER && t->GetCharmerOrOwnerPlayerOrPlayerItself() != nullptr;
+            if (TempSummon const* summon = t->ToTempSummon())
+                u.player_summoned = summon->GetSummonerGUID().IsPlayer();
+            u.hostile = t->IsHostileTo(p);
             u.entry  = t->GetEntry();
             u.level  = t->GetLevelForTarget(p);   // per-viewer scaled level (see attackers note / audit doc)
             u.hp     = static_cast<int32>(t->GetHealth());
@@ -8009,7 +8345,7 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
                     }
                     if (tmpl->GetClass() == ITEM_CLASS_WEAPON)
                     {
-                        const float dps = tmpl->GetDPS(base_ilvl);
+                        const float dps = tmpl->GetClassicDPS(base_ilvl, tmpl->HasFlag(ITEM_FLAG4_REGULATED_COMMODITY));   // Classic 1.60 (EV-0097)
                         if (dps > 0.f)
                             approx.weapon_dps_x10 =
                                 static_cast<uint16>(std::clamp<float>(dps * 10.f, 0.f, 65535.f));
@@ -8022,7 +8358,10 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
                              snap->stat_weights.spec_weapon_dps_weight;
                         return v;
                     };
-                    const float roll_score = score_block(approx, static_cast<uint16>(base_ilvl));
+                    // Both sides keep the share of their worth their armor type has for this bot (LevellingArmorFactor): a level 21
+                    // warrior rolled need on an agility leather chest over its mail one.
+                    const float roll_score = score_block(approx, static_cast<uint16>(base_ilvl)) *
+                        ::Playerbot::V2::Gear::LevellingArmorFactor(li->itemid, snap->identity.cls, uint16(snap->identity.spec), snap->identity.level);
 
                     for (uint8 slot = EQUIPMENT_SLOT_START; slot < EQUIPMENT_SLOT_END; ++slot)
                     {
@@ -8060,7 +8399,8 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
                         {
                             ItemTemplate const* eq_tmpl = sObjectMgr->GetItemTemplate(eq.entry);
                             if (!eq_tmpl) continue;
-                            const float eq_score = score_block(eq.stats, eq.item_level);
+                            const float eq_score = score_block(eq.stats, eq.item_level) *
+                                ::Playerbot::V2::Gear::LevellingArmorFactor(eq.entry, snap->identity.cls, uint16(snap->identity.spec), snap->identity.level);
                             // A real upgrade beats the worn item by at least
                             // 5% (the owner); side-grades are greed.
                             const float margin   = std::max(1.f, eq_score * 0.05f);
@@ -8205,7 +8545,13 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
                 // the bot out of damage range. We DO want non-hostile
                 // traps in nearby_objects too (some quest scripts trigger
                 // off them), so the type passes the filter unconditionally.
-                t == GAMEOBJECT_TYPE_TRAP;
+                t == GAMEOBJECT_TYPE_TRAP           ||
+                // RITUAL (18): an altar that needs several users (Uldaman's two altars, the UBRS Blackrock Altar). The group's
+                // bots fill the places a person in the group leaves open (ritual_join below).
+                t == GAMEOBJECT_TYPE_RITUAL ||
+                // DOOR (0): only a shut one a player opens by hand (IsShutHandDoor, or named by the dungeon: IsListedShutHandDoor),
+                // or one that opens to a key this bot carries (KeyForShutDoor), for idle:dungeon_open_hand_door.
+                (t == GAMEOBJECT_TYPE_DOOR && (IsShutHandDoor(go) || IsListedShutHandDoor(go) || KeyForShutDoor(p, go) != 0));
             if (!useful) continue;
             const float dx = go->GetPositionX() - p->GetPositionX();
             const float dy = go->GetPositionY() - p->GetPositionY();
@@ -8245,6 +8591,13 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
             n.x = go->GetPositionX();
             n.y = go->GetPositionY();
             n.z = go->GetPositionZ();
+            if (n.go_type == GAMEOBJECT_TYPE_RITUAL)
+                n.ritual_join = RitualNeedsBot(p, go);
+            n.hand_door = n.go_type == GAMEOBJECT_TYPE_DOOR;   // the filter above lets in only a shut hand door
+            if (n.hand_door && !IsShutHandDoor(go) && !IsListedShutHandDoor(go))
+                n.key_item = KeyForShutDoor(p, go);   // a door only a key opens: the bot uses its key on it
+            if (n.go_type == GAMEOBJECT_TYPE_CHEST)
+                n.key_chest = IsListedKeyChest(p, go);
             // Destructible gate breach state (IoC / SoTA) so the siege-fire
             // rule skips already-down gates and advances to the next line.
             if (n.go_type == GAMEOBJECT_TYPE_DESTRUCTIBLE_BUILDING)
@@ -10721,6 +11074,7 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
     // idle:summon_stabled_pet rule so a hunter that ends up petless (died
     // and despawned, abandoned) can pull a stabled pet at the next
     // stablemaster visit. Empty for non-hunters or pre-PetStable bots.
+    snap->pet.has_dead_active_pet = false;
     if (PetStable const* stable = p->GetPetStable())
     {
         snap->pet.stable_pets.reserve(8);
@@ -10733,6 +11087,8 @@ std::shared_ptr<BotSnapshot const> BotSnapshotBuilder::Build(Player* p, BotAI* b
             sp.creature_id = info.CreatureId;
             sp.name        = info.Name;
             sp.level       = info.Level;
+            if (info.CreatureId && info.Health == 0)
+                snap->pet.has_dead_active_pet = true;
             sp.slot_kind   = 0;  // active
             sp.slot_index  = i;
             snap->pet.stable_pets.push_back(std::move(sp));
@@ -11014,6 +11370,13 @@ bool HubHasDoableQuest(Player* p, ::Playerbot::V2::Travel::QuestHub const& h)
             return true;   // early-exit at first doable quest
     }
     return false;
+}
+
+// Map::ClosedDoorPlanThroughCheck: a shut door the tank opens on reaching it (DungeonOpenHandDoor) is no wall to a bot's plans, which
+// run off the map thread against the published doors. Only the move stops at it, which brings the tank to the door to click it.
+bool DoorOpenedByHand(GameObject const* go)
+{
+    return IsShutHandDoor(go) || IsListedShutHandDoor(go);
 }
 
 } // namespace Playerbot

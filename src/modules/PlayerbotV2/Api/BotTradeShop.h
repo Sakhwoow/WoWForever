@@ -41,6 +41,9 @@ bool IsUpgrade(Player* bot, ItemTemplate const* tmpl);
 constexpr int32 kLaterLevels = 10;
 bool IsForLater(Player const* bot, ItemTemplate const* tmpl);
 
+// A consumable the bot uses itself: a potion, elixir, flask, food or drink, weapon oil or stone, or bandage it can use now.
+bool IsOwnSupply(Player const* bot, ItemTemplate const* tmpl);
+
 // The stacks the bot is willing to sell, most valuable first, at most `max` of them: tradeable, no quest items, nothing the bot
 // itself lives on (consumables, reagents, ammo) and no gear that would be an upgrade for it.
 std::vector<Offer> BuildOffers(Player* bot, uint32 max = 10);
@@ -64,6 +67,11 @@ std::vector<Item*> PickGifts(Player* bot, Player* partner, std::string const& wa
 // The things a bot hands over for nothing in its next trade window with `partner` (within ten minutes); one list per bot.
 void StoreGift(Player const* bot, ObjectGuid partner, std::vector<ObjectGuid> items);
 
+// The owner's "enchant <item>" order (BotCommandParser): in the trade window `serial` the bot opened with `partner`, the bot puts
+// `item` (worn or from its bags) in the "will not be traded" slot, waits until he has put an enchant on it, and accepts. Forgotten
+// when that window closes or after ten minutes; one per bot.
+void StoreEnchantJob(Player const* bot, ObjectGuid partner, ObjectGuid item, uint64 serial);
+
 // "1) Linen Cloth x20 - 40s" lines packed into whisper-sized chunks.
 std::vector<std::string> Describe(std::vector<Offer> const& list);
 
@@ -72,7 +80,8 @@ std::vector<std::string> Describe(std::vector<Offer> const& list);
 std::vector<uint32> TakeGiftGear(uint64 bot_id);
 
 // One step of an open trade window; see API::trade_with.
-Result Step(Player* bot, TradeData* mine, TradeData* his, bool gift_ok);
+// from_owner: the partner is the bot's owner, whose every item and coin is a gift (BotTrade::View::from_owner).
+Result Step(Player* bot, TradeData* mine, TradeData* his, bool gift_ok, bool from_owner);
 
 } // namespace Playerbot::TradeShop
 

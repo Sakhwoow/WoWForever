@@ -1,7 +1,9 @@
 #include "ConfigReader.h"
 #include "../Bot/ThreatLimits.h"
 #include "Config.h"
+#include "ConfigBaseFile.h"
 #include "Log.h"
+#include "StringFormat.h"
 #include "StringConvert.h"
 #include "Util.h"
 #include <algorithm>
@@ -16,12 +18,21 @@ bool ConfigReader::load(std::string const& file_path)
     std::string err;
 
     // TrinityCore's sConfigMgr is a singleton; we layer our keys onto its state.
-    // If the file doesn't exist, fall through to defaults silently.
-    if (!file_path_.empty() && !sConfigMgr->LoadAdditionalFile(file_path_, true, err))
+    // playerbot.conf goes in as a BASE file: its keys beat worldserver.conf, and
+    // every worldserver.conf.d file beats it, at startup and after every reload
+    // (it used to be added after conf.d, so a playerbot.conf key silently beat
+    // a conf.d override). If the file doesn't exist, fall through to defaults.
+    if (!file_path_.empty() && !Trinity::Config::LoadBaseFile(file_path_, err))
     {
         TC_LOG_WARN("playerbot.v2", "[PlayerbotV2] playerbot.conf missing or unreadable ({}): {}", file_path_, err);
         // Defaults are acceptable; not a hard failure.
     }
+    refresh();
+    return true;
+}
+
+void ConfigReader::refresh()
+{
     apply_from_loaded_config();
 
     // B-1 observability: playerbot.conf is layered with override=true, so
@@ -31,16 +42,35 @@ bool ConfigReader::load(std::string const& file_path)
     // the precedence once per load/reload so the log answers it.
     TC_LOG_INFO("playerbot.v2",
         "[Config] effective population: TotalTarget={} "
-        "HordePct={} Shape={} MaxHeavyFactor={:.2f} (Playerbot.* keys in '{}' override worldserver.conf)",
+        "HordePct={} Shape={} MaxHeavyFactor={:.2f} (keys in '{}' override worldserver.conf; worldserver.conf.d overrides both)",
         pop_target_,
         pop_horde_pct_, pop_shape_, pop_max_heavy_factor_,
         file_path_.empty() ? "<none>" : file_path_);
-    return true;
+    TC_LOG_INFO("playerbot.v2", "[Config] {}", effective_summary());
+}
+
+std::string ConfigReader::effective_summary() const
+{
+    // The keys a test run flips most, read back from the merged config so a
+    // reload shows at once whether a conf.d change arrived.
+    return Trinity::StringFormat("effective: ParallelSnapshotBuild={} SnapshotBuildSplitMap={} World.Enable={} World.SoakAnchors=\"{}\"",
+        parallel_snapshot_build_ ? 1 : 0, snapshot_build_split_map_ ? 1 : 0,
+        sConfigMgr->GetBoolDefault("Playerbot.World.Enable", false, true) ? 1 : 0,
+        sConfigMgr->GetStringDefault("Playerbot.World.SoakAnchors", "", true));
 }
 
 bool ConfigReader::reload()
 {
-    return load(file_path_);
+    // Read every config file again in its normal order (worldserver.conf,
+    // playerbot.conf, worldserver.conf.d, environment), then take the values.
+    // Re-adding playerbot.conf on top, as this did before, made its keys beat
+    // the conf.d overrides until the next restart.
+    std::vector<std::string> errors;
+    bool const ok = sConfigMgr->Reload(errors);
+    for (std::string const& e : errors)
+        TC_LOG_ERROR("playerbot.v2", "[Config] reload: {}", e);
+    refresh();
+    return ok;
 }
 
 void ConfigReader::apply_from_loaded_config()
@@ -61,6 +91,7 @@ void ConfigReader::apply_from_loaded_config()
     // pre-resolving the BotAI* on the world thread. Kill-switch: set =0 to serial.
     parallel_snapshot_build_ = c.GetBoolDefault("PlayerbotV2.ParallelSnapshotBuild", true, true);
     snapshot_build_threads_  = c.GetIntDefault ("PlayerbotV2.SnapshotBuildThreads", 0, true);
+    snapshot_build_split_map_ = c.GetBoolDefault("PlayerbotV2.SnapshotBuildSplitMap", false, true);
 
     // Classic 1.60 (Forever) default: 0 = no ambient world bots, owner bots only.
     pop_target_     = c.GetIntDefault ("Playerbot.Population.TotalTarget", 0, true);
@@ -69,7 +100,9 @@ void ConfigReader::apply_from_loaded_config()
     pop_max_heavy_factor_ = float(c.GetFloatDefault("Playerbot.Population.MaxHeavyFactor", 0.40f, true));
     pop_spawn_cap_factor_ = std::max(1.0f, float(c.GetFloatDefault("Playerbot.Population.SpawnCapFactor", 1.10f, true)));
 
-    accept_invites_       = c.GetStringDefault("Playerbot.Interact.AutoAcceptInvites", "friends_or_higher", true);
+    // The old Playerbot.Interact.AutoAcceptInvites (friends_or_higher in every installed playerbot.conf) was never read; a new key, so
+    // those files do not start refusing invites when it begins to work.
+    accept_invites_from_  = InvitePolicy::Parse(c.GetStringDefault("Playerbot.Interact.AcceptInvitesFrom", "anyone", true));
     auto_leader_handover_ = c.GetBoolDefault  ("Playerbot.Interact.AutoLeaderHandover", true, true);
     {
         std::string prefix = c.GetStringDefault("Playerbot.Interact.CommandPrefix", "!", true);
@@ -80,6 +113,7 @@ void ConfigReader::apply_from_loaded_config()
     boss_warnings_enabled_ = c.GetBoolDefault("Playerbot.Raid.BossWarnings", true, true);
     raid_callouts_enabled_ = c.GetBoolDefault("Playerbot.Raid.Callouts", true, true);
     raid_banter_ = c.GetIntDefault("Playerbot.Raid.Banter", 1, true);
+    raid_talk_ = c.GetIntDefault("Playerbot.Raid.Talk", 1, true);
     raid_auto_accept_rez_ = c.GetBoolDefault("Playerbot.Raid.AutoAcceptOwnerRez", true, true);
 
     housing_enabled_   = c.GetBoolDefault("Playerbot.Housing.Enabled", false, true);
@@ -204,6 +238,7 @@ void ConfigReader::apply_from_loaded_config()
     bhv_spread_out_           = c.GetBoolDefault("Playerbot.Behavior.SpreadOut", true, true);
     bhv_loose_mob_hold_       = c.GetBoolDefault("Playerbot.Behavior.LooseMobHold", true, true);
     bhv_raid_buff_hold_       = c.GetBoolDefault("Playerbot.Behavior.RaidBuffHold", true, true);
+    bhv_healer_assist_        = c.GetBoolDefault("Playerbot.Behavior.HealerAssist", true, true);
     bhv_dungeon_loot_         = c.GetBoolDefault("Playerbot.Behavior.DungeonLoot", true, true);
     bhv_warrior_stance_dance_ = c.GetBoolDefault("Playerbot.Behavior.WarriorStanceDance", true, true);
     bhv_bot_whisperable_      = c.GetBoolDefault("Playerbot.Behavior.BotWhisperable", true, true);
@@ -319,7 +354,8 @@ void ConfigReader::apply_from_loaded_config()
         "205312:34:24:32,205568:90:29:38,205824:47:29:38,206080:189:30:38,206336:129:37:46,206592:70:41:51,"
         "206848:209:44:54,207104:349:46:55,207360:109:50:60,207616:230:52:60,207872:229:55:60,208128:429:54:60,"
         "208384:429:56:60,208640:429:56:60,208896:329:58:60,211712:189:36:44,211968:189:38:46,212224:189:33:41,"
-        "214272:229:59:60:10";
+        "214272:229:59:60:10,228864:2998:26:33,229120:2999:15:22,229632:3065:13:20,506368:3001:58:60,506624:2974:55:60,"
+        "506880:2994:48:55,508160:2970:35:42,508416:3039:40:47";
     lfg_bot_groups_activities_ = V2::ParseListedActivities(c.GetStringDefault("Playerbot.Lfg.BotGroups.Activities", kDefaultListedActivities, true));
     lfg_finder_enable_        = c.GetBoolDefault("Playerbot.Lfg.Finder.Enable", true, true);
     // empty = the doors named in DungeonFinderPlan.h

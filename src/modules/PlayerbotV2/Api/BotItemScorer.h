@@ -67,6 +67,13 @@ int32 EffectiveItemLevelForLevel(ItemTemplate const* tpl, uint8 level);
 // warriors hold Plate Mail (293) and 13931/14022 hunters hold Mail (413).
 ItemSubclassArmor PreferredArmorForClass(uint8 cls);
 
+// The highest armor tier the class can put on at this level: what the scorer ranks against. On the level-60 (Forever) realm
+// the trainers teach Mail (8737) and Plate Mail (750) at 40 (trainer_spell ReqLevel 40), so below 40 a warrior or paladin
+// wears mail and a hunter or shaman leather. Elsewhere it is PreferredArmorForClass. Ranking against plate a sub-40 warrior
+// cannot wear put mail and leather under the same penalty, and an agility leather piece beat the mail one (DoctorSun,
+// Discord 2026-11-17: a level 21 warrior in leather).
+ItemSubclassArmor WearableArmorForClass(uint8 cls, uint8 level);
+
 // Returns the primary stat (ITEM_MOD_STRENGTH/AGILITY/INTELLECT) for the
 // (class, spec) pair. Hybrid classes (Druid/Monk/Pally/Sham) have spec-
 // dependent primaries; pure classes return their fixed stat.
@@ -97,6 +104,11 @@ char const* RaidRoleName(RaidRole role);
 // means useless to this role, a very negative value means never wear (PvP stats). Includes the equip / use / proc
 // item spells' auras (+healing, +damage, +attack power, hit, crit, mp5...) that are not item stats.
 int32 ScoreItemRaid(ItemTemplate const* tpl, uint8 cls, uint16 spec, uint8 level, uint8 slot);
+
+// The share of its worth an armor piece keeps for this wearer: 1 for its own armor type, a fifth less a tier under the best type it
+// can put on at `level` (two fifths for a tank), 1 for anything that is not a head-to-feet armor piece (Bot/Gear/ArmorTypeFit.h).
+// ScoreItemRaid applies it; the levelling gear compares (EquipFitScore: item level and weighted stats, no armor) multiply by it.
+float ArmorTypeFitFactor(ItemTemplate const* tpl, uint8 cls, uint16 spec, uint8 level);
 
 // The item's resistance points in `school` (SpellSchools: holy 1, fire 2, nature 3, frost 4, shadow 5, arcane 6) for a wearer at `level`:
 // the school's own resistance stat plus resistance to all schools, as the wearer gets them. 0 when it carries none.

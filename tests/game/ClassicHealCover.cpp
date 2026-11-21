@@ -22,6 +22,22 @@
 
 using namespace Playerbot::Combat::ClassicHeal;
 
+// naxx_patchwerk 1116 rerun: a soaker took a 9.8k Hateful Strike 3 s ago; the next one can come any moment, so it is the damage to cover.
+TEST_CASE("The largest recent hit is kept for the spike window and replaced only by a larger one", "[ClassicHealCover]")
+{
+    DamageSpike s;
+    CHECK(DamageSpikeAt(s, 1000) == 0);
+    DamageSpikeAdd(s, 9800, 1000);
+    DamageSpikeAdd(s, 1200, 2000);   // a swing after the strike does not lower it
+    CHECK(DamageSpikeAt(s, 4000) == 9800);
+    CHECK(DamageSpikeAt(s, 1000 + kSpikeWindowMs) == 9800);
+    CHECK(DamageSpikeAt(s, 1001 + kSpikeWindowMs) == 0);
+    DamageSpikeAdd(s, 1500, 20000);   // after the window, a new hit starts over
+    CHECK(DamageSpikeAt(s, 20000) == 1500);
+    // A soaker at 96% with a 9.8k spike is not covered by 7.6k in flight.
+    CHECK_FALSE(CoveredByHealsInFlight(10929, 10929 - 400, 0, 7600, 96, 1.0f, true, 9800));
+}
+
 // MC Garr 2026-10-10, patient 2605: 64 % health, 1406 missing, 1692 of swings coming, 2280 of heals in flight. Five healers piled on.
 TEST_CASE("Heals in flight that exceed the missing health plus half the swings refuse another heal", "[ClassicHealCover]")
 {
@@ -121,4 +137,44 @@ TEST_CASE("A heal claim written through one call site is read through another an
     ReleaseHealClaim(42, ObjectGuid::Create<HighGuid::Player>(7), now);
     size_t const left = WithHealClaims(now, [](std::unordered_map<uint64, HealClaim> const& c) { return c.count(42); });
     CHECK(left == 0);
+}
+
+// Naxx Patchwerk 1115b, off tank 2573: 63 % of 10759 (3980 missing), no swing on him (Hateful Strike is no swing), 4058 of heals in
+// flight landing in 2.4 s. Hateful Strike every 1.2 s at about 4000 after armour put his measured rate near 3300 a second: about 7900
+// comes before the heal lands, so it covers nothing and the next healers start theirs.
+TEST_CASE("The damage a measured rate brings before the first heal lands counts in the deficit", "[ClassicHealCover]")
+{
+    int64_t const max_hp = 10759, hp = max_hp - 3980;
+    CHECK(CoveredByHealsInFlight(max_hp, hp, 0, 4058, 63, 1.0f));   // the old check: one heal covers him
+    int64_t const until_land = DamageUntilLand(3300.0f, 2400);
+    CHECK(until_land == 7920);
+    CHECK(HealDeficitOf(max_hp, hp, 0, until_land) == 3980 + 7920);
+    CHECK_FALSE(CoveredByHealsInFlight(max_hp, hp, 0, 4058, 63, 1.0f, true, until_land));
+    CHECK(CoveredByHealsInFlight(max_hp, hp, 0, 12000, 63, 1.0f, true, until_land));
+}
+
+TEST_CASE("Swings and the measured rate are the same damage: the larger counts, not both", "[ClassicHealCover]")
+{
+    CHECK(HealDeficitOf(5000, 4000, 2000, 600) == 1000 + 1000);    // half the swings is more
+    CHECK(HealDeficitOf(5000, 4000, 2000, 1500) == 1000 + 1500);   // the rate is more
+    CHECK(DamageUntilLand(0.0f, 2000) == 0);
+    CHECK(DamageUntilLand(1000.0f, -50) == 0);                    // a heal already landing brings nothing more
+}
+
+TEST_CASE("The damage rate follows the hits and decays when they stop", "[ClassicHealCover]")
+{
+    DamageRate r;
+    CHECK(DamageRateAt(r, 1000) == 0.0f);
+    // 1000 every 500 ms for 30 s: 2000 a second.
+    uint32_t t = 1000;
+    for (int i = 0; i < 60; ++i, t += 500)
+        DamageRateAdd(r, 1000, t);
+    float const steady = DamageRateAt(r, t - 250);   // between two hits
+    CHECK(steady > 1800.0f);
+    CHECK(steady < 2200.0f);
+    // Three time constants with no hit: under a twentieth is left.
+    CHECK(DamageRateAt(r, t + 9000) < steady / 20.0f);
+    DamageRateAdd(r, 0, t);    // nothing landed: no change
+    DamageRateAdd(r, -5, t);
+    CHECK(DamageRateAt(r, t + 9000) < steady / 20.0f);
 }

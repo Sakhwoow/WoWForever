@@ -26,6 +26,7 @@
 #include "CharacterPackets.h"
 #include "ChatPackets.h"
 #include "ClientConfigPackets.h"
+#include "CombatLogWatch.h"
 #include "Containers.h"
 #include "DatabaseEnv.h"
 #include "FriendsService.h"
@@ -604,7 +605,7 @@ bool WorldSession::Update(uint32 diff, PacketFilter& updater)
         if (std::ranges::any_of(m_Socket, [](std::shared_ptr<WorldSocket> const& s) { return s && !s->IsOpen(); }))
         {
             expireTime -= expireTime > diff ? diff : expireTime;
-            if (expireTime < diff || forceExit || !GetPlayer())
+            if (expireTime < diff || forceExit.load(std::memory_order_relaxed) || !GetPlayer())
             {
                 for (std::shared_ptr<WorldSocket>& socket : m_Socket)
                 {
@@ -639,6 +640,9 @@ void WorldSession::LogoutPlayer(bool save)
         // Captured early because the bot-only per-character offline write
         // below runs after _player is nulled out by SetPlayer(nullptr).
         uint64 const playerGuidLow = _player->GetGUID().GetCounter();
+
+        // a GM's combat log watch (.gm combatlog) ends with the GM's logout
+        CombatLogWatch::Stop(_player->GetGUID());
 
         if (!_player->GetLootGUID().IsEmpty())
             DoLootReleaseAll();
@@ -804,14 +808,14 @@ void WorldSession::KickPlayer(std::string_view reason)
     // A headless bot session has no socket to close; flag the exit directly so BotSession::Update
     // logs the bot out and the session manager reaps it (failed logins, GM kick/ban).
     if (IsBot())
-        forceExit = true;
+        forceExit.store(true, std::memory_order_relaxed);
 
     for (std::shared_ptr<WorldSocket> const& socket : m_Socket)
     {
         if (socket)
         {
             socket->CloseSocket();
-            forceExit = true;
+            forceExit.store(true, std::memory_order_relaxed);
         }
     }
 }
@@ -1295,19 +1299,23 @@ bool WorldSession::IsAddonRegistered(std::string_view prefix) const
 void WorldSession::HandleUnregisterAllAddonPrefixesOpcode(WorldPackets::Chat::ChatUnregisterAllAddonPrefixes& /*packet*/) // empty packet
 {
     _registeredAddonPrefixes.clear();
+    if (Player* player = GetPlayer())
+        player->RequestCombatNameplates(false, false);
 }
 
 void WorldSession::HandleAddonRegisteredPrefixesOpcode(WorldPackets::Chat::ChatRegisterAddonPrefixes& packet)
 {
     // This is always sent after CMSG_CHAT_UNREGISTER_ALL_ADDON_PREFIXES
+    bool const announceCombatNameplates = GetClientBuild() >= 70532 && GetPlayer() &&
+        !advstd::ranges::contains(_registeredAddonPrefixes, Player::CombatNameplatePrefix) &&
+        advstd::ranges::contains(packet.Prefixes, Player::CombatNameplatePrefix);
     _registeredAddonPrefixes.insert(_registeredAddonPrefixes.end(), packet.Prefixes.begin(), packet.Prefixes.end());
-    if (_registeredAddonPrefixes.size() > WorldPackets::Chat::ChatRegisterAddonPrefixes::MAX_PREFIXES)
-    {
-        _filterAddonMessages = false;
-        return;
-    }
-
-    _filterAddonMessages = true;
+    _filterAddonMessages = _registeredAddonPrefixes.size() <= WorldPackets::Chat::ChatRegisterAddonPrefixes::MAX_PREFIXES;
+    if (advstd::ranges::contains(packet.Prefixes, Player::CombatNameplatePrefix))
+        TC_LOG_INFO("server.combatplates", "[combat_plates] {}: prefix registered (build {}, {} prefixes, filter {}), READY {}", GetPlayerInfo(),
+            GetClientBuild(), _registeredAddonPrefixes.size(), _filterAddonMessages, announceCombatNameplates ? "sent" : "not sent");
+    if (announceCombatNameplates)
+        GetPlayer()->WhisperAddon("READY", Player::CombatNameplatePrefix, false, GetPlayer());
 }
 
 void WorldSession::SetPlayer(Player* player)
@@ -1772,6 +1780,15 @@ uint32 WorldSession::DosProtection::GetMaxPacketCounterAllowed(uint32 opcode) co
             // "0" is a magic number meaning there's no limit for the opcode.
             // All the opcodes above must cause little CPU usage and no sync/async database queries at all
             maxPacketCounterAllowed = 0;
+            break;
+        }
+
+        // Auto loot (or a fast-loot add-on) with full bags asks for every item again each frame until there is room: at a high frame rate
+        // that is well over the default 100 a second, and the player was kicked for it (Discord 11-14, varanday on 0.1.36.1: "flooding
+        // packet (opc: CMSG_LOOT_ITEM, count: 101)"). Each request is answered with "inventory full", nothing more.
+        case CMSG_LOOT_ITEM:
+        {
+            maxPacketCounterAllowed = 600;
             break;
         }
 
