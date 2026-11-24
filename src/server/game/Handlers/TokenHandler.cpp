@@ -481,7 +481,9 @@ void WorldSession::SendShopProductList()
 
     WorldPackets::BattlePay::ProductListResponse response;
     response.Result = enabled ? 0 : 2;
-    response.CurrencyID = enabled ? 1 : 0;
+    // Currency shown next to a price: 1 = US ($), 2 = EU, 3 = KR ... (client's store currency info). Configurable so a
+    // realm can try another one without a code change; 0 = whatever the client falls back to.
+    response.CurrencyID = enabled ? uint32(sConfigMgr->GetIntDefault("Classic.Shop.CurrencyID", 1)) : 0;
 
     if (enabled)
     {
