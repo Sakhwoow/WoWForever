@@ -32,6 +32,8 @@
 #include "ObjectMgr.h"
 #include "Player.h"
 #include "RBAC.h"
+#include "Random.h"
+#include "ShopWallet.h"
 #include "StringFormat.h"
 #include "WorldSession.h"
 
@@ -56,6 +58,7 @@ public:
             { "points",     HandlePointsCommand,     rbac::RBAC_PERM_COMMAND_RELOAD, Console::Yes },
             { "balance",    HandleBalanceCommand,    rbac::RBAC_PERM_COMMAND_RELOAD, Console::Yes },
             { "boost",      HandleBoostCommand,      rbac::RBAC_PERM_COMMAND_RELOAD, Console::Yes },
+            { "refund",     HandleRefundCommand,     rbac::RBAC_PERM_COMMAND_RELOAD, Console::Yes },
             { "goldlist",   HandleGoldListCommand,   rbac::RBAC_PERM_COMMAND_RELOAD, Console::Yes },
             { "goldcancel", HandleGoldCancelCommand, rbac::RBAC_PERM_COMMAND_RELOAD, Console::Yes },
         };
@@ -75,9 +78,8 @@ public:
 
     static uint32 GetPoints(uint32 accountId)
     {
-        if (QueryResult result = LoginDatabase.PQuery("SELECT Points FROM account_shop_points WHERE AccountID = {}", accountId))
-            return (*result)[0].GetUInt32();
-        return 0;
+        // Unified wallet: shop points are the site bonus balance of the linked site account.
+        return ShopWallet::Balance(accountId);
     }
 
     // .shop points <amount> [character]: add shop points to the character's account (negative takes them, not below 0)
@@ -100,8 +102,25 @@ public:
             return false;
         }
 
-        LoginDatabase.DirectPExecute("INSERT INTO account_shop_points (AccountID, Points) VALUES ({0}, {1}) "
-            "ON DUPLICATE KEY UPDATE Points = GREATEST(0, CAST(Points AS SIGNED) + {2})", accountId, std::max(amount, 0), amount);
+        if (amount != 0)
+        {
+            std::string key = Trinity::StringFormat("gm-{}-{}", accountId, urand(1, 100000000));
+            ShopWallet::Result result = amount > 0
+                ? ShopWallet::Credit(accountId, uint32(amount), "GM shop points adjustment", key)
+                : ShopWallet::Debit(accountId, uint32(-amount), "GM shop points adjustment", key);
+            if (!result.ok)
+            {
+                if (result.code == -2)
+                    handler->SendSysMessage("ERROR the account is not linked to a site account (link it on azeroth.su: Магазин → Forever в клиенте → Бонусы)");
+                else if (result.code == -3)
+                    handler->SendSysMessage("ERROR not enough shop points");
+                else
+                    handler->SendSysMessage("ERROR could not change shop points (database error)");
+                handler->SetSentErrorMessage(true);
+                return false;
+            }
+        }
+
         uint32 points = GetPoints(accountId);
 
         handler->PSendSysMessage("OK %s: %d points, account %u now has %u.", player->GetName().c_str(), amount, accountId, points);
@@ -162,6 +181,44 @@ public:
         return true;
     }
 
+    // .shop refund <purchase id>: return the charged shop points of a purchase (delivery failed or a manual refund)
+    static bool HandleRefundCommand(ChatHandler* handler, uint64 purchaseId)
+    {
+        QueryResult result = LoginDatabase.PQuery("SELECT `AccountID`, `Price`, `Status` FROM shop_purchase WHERE `PurchaseID` = {}", purchaseId);
+        if (!result)
+        {
+            handler->SendSysMessage("ERROR no such purchase");
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+
+        uint32 accountId = (*result)[0].GetUInt32();
+        uint32 price = (*result)[1].GetUInt32();
+        std::string_view status = (*result)[2].GetStringView();
+        if (status == "refunded")
+        {
+            handler->SendSysMessage("ERROR this purchase is already refunded");
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+
+        ShopWallet::Result refund = ShopWallet::Credit(accountId, price,
+            Trinity::StringFormat("Возврат покупки {}", purchaseId),
+            Trinity::StringFormat("refund-{}", purchaseId));
+        if (!refund.ok)
+        {
+            handler->PSendSysMessage("ERROR refund failed (code %d)", refund.code);
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+
+        LoginDatabase.PExecute("UPDATE shop_purchase SET `Status` = 'refunded' WHERE `PurchaseID` = {}", purchaseId);
+        handler->PSendSysMessage("OK purchase %llu refunded: %u points to account %u, balance %u.",
+            purchaseId, price, accountId, refund.balance);
+        TC_LOG_INFO("entities.player", "Shop: purchase {} refunded to account {} ({} points)", purchaseId, accountId, price);
+        return true;
+    }
+
     static bool HandleGoldListCommand(ChatHandler* handler, std::string name, uint32 gold, uint32 price)
     {
         if (!normalizePlayerName(name))
@@ -180,6 +237,13 @@ public:
         if (!character)
         {
             handler->SendSysMessage("ERROR unknown character");
+            return true;
+        }
+
+        // The seller is paid in shop points on the site ledger, so the game account has to be linked to a site account.
+        if (!ShopWallet::IsLinked(character->AccountId))
+        {
+            handler->SendSysMessage("ERROR the account is not linked to a site account (link it on azeroth.su: Магазин → Forever в клиенте → Бонусы)");
             return true;
         }
 

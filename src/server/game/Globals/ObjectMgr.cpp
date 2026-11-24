@@ -842,7 +842,9 @@ void ObjectMgr::LoadShop()
     _shopProductStore.clear();
 
     //                                               0   1     2               3
-    if (QueryResult result = WorldDatabase.Query("SELECT ID, Name, IconFileDataID, Ordering FROM shop_group"))
+    // Enabled = 0 hides the tab from the client; products of such a group are skipped below
+    // because their GroupID is not in _shopGroupStore.
+    if (QueryResult result = WorldDatabase.Query("SELECT ID, Name, IconFileDataID, Ordering FROM shop_group WHERE Enabled = 1"))
     {
         do
         {

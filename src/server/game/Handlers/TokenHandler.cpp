@@ -33,6 +33,7 @@
 #include "PlayerDump.h"
 #include "Random.h"
 #include "RealmList.h"
+#include "ShopWallet.h"
 #include "SpellMgr.h"
 #include "StringConvert.h"
 #include "StringFormat.h"
@@ -591,9 +592,38 @@ constexpr int32 ShopPurchaseResultError = 1;
 
 uint32 GetShopPoints(uint32 accountId)
 {
-    if (QueryResult result = LoginDatabase.PQuery("SELECT Points FROM account_shop_points WHERE AccountID = {}", accountId))
-        return (*result)[0].GetUInt32();
-    return 0;
+    // Shop points are the site bonus balance of the linked site account (acore_site.account_coins).
+    return ShopWallet::Balance(accountId);
+}
+
+// Purchase state: a purchase is charged once, then delivered or refunded (auth.shop_purchase).
+// The client can repeat the confirmation packet; the state keeps the reward and the charge single.
+enum class ShopPurchaseState : uint8
+{
+    None,
+    Charged,
+    Delivered,
+    Refunded
+};
+
+ShopPurchaseState GetShopPurchaseState(uint64 purchaseId)
+{
+    if (QueryResult result = LoginDatabase.PQuery("SELECT `Status` FROM shop_purchase WHERE `PurchaseID` = {}", purchaseId))
+    {
+        std::string_view status = (*result)[0].GetStringView();
+        if (status == "charged")
+            return ShopPurchaseState::Charged;
+        if (status == "delivered")
+            return ShopPurchaseState::Delivered;
+        if (status == "refunded")
+            return ShopPurchaseState::Refunded;
+    }
+    return ShopPurchaseState::None;
+}
+
+void SetShopPurchaseState(uint64 purchaseId, std::string_view status)
+{
+    LoginDatabase.PExecute("UPDATE shop_purchase SET `Status` = '{}' WHERE `PurchaseID` = {}", status, purchaseId);
 }
 
 WorldPackets::BattlePay::Purchase MakeShopPurchase(uint64 purchaseId, ShopProduct const& product, int32 status, int32 result, int64 timeCreated, uint32 points)
@@ -944,38 +974,101 @@ void WorldSession::HandleBattlePayConfirmPurchaseResponse(WorldPackets::BattlePa
             result = ShopPurchaseResultError;
         else
         {
-            if (listing)
+            ShopPurchaseState state = GetShopPurchaseState(pending.PurchaseID);
+            if (state == ShopPurchaseState::Delivered || state == ShopPurchaseState::Refunded)
             {
-                // Gold Market: the listing is gone once bought; the seller's account gets the price minus the fee
-                CharacterDatabase.DirectPExecute("DELETE FROM shop_gold_listing WHERE ID = {}", listing->ID);
-                // fee percent from auth.shop_config (support site GM part), else the config; at least 1 point while the percent is not 0
-                int32 feePercent = sConfigMgr->GetIntDefault("Classic.Shop.GoldMarketFee", 10);
-                if (QueryResult feeResult = LoginDatabase.Query("SELECT Value FROM shop_config WHERE Name = 'GoldMarketFee'"))
-                    feePercent = Trinity::StringTo<int32>((*feeResult)[0].GetStringView()).value_or(feePercent);
-                feePercent = std::clamp(feePercent, 0, 100);
-                uint32 fee = uint32(uint64(listing->Price) * feePercent / 100);
-                if (feePercent && !fee)
-                    fee = 1;
-                if (listing->SellerAccount && listing->Price > fee)
-                    LoginDatabase.PExecute("INSERT INTO account_shop_points (AccountID, Points) VALUES ({0}, {1}) ON DUPLICATE KEY UPDATE Points = Points + {1}",
-                        listing->SellerAccount, listing->Price - fee);
-                TC_LOG_INFO("entities.player", "Shop: Gold Market listing {} ({} gold, {} points, fee {}) of account {} sold to account {}",
-                    listing->ID, listing->Gold, listing->Price, fee, listing->SellerAccount, GetAccountId());
+                // repeated confirmation packet: the reward was already applied (or refunded), report the current balance only
+                points = GetShopPoints(GetAccountId());
             }
+            else if (state == ShopPurchaseState::Charged)
+            {
+                // a previous attempt charged the points but did not finish: never charge or deliver twice
+                result = ShopPurchaseResultError;
+                if (_player)
+                    ChatHandler(this).SendSysMessage("Shop: this purchase is already being processed. Contact support if the item did not arrive.");
+            }
+            else
+            {
+                // Unified wallet: the charge is a site ledger entry, serialized and idempotent on the site side.
+                ShopWallet::Result debit = ShopWallet::Debit(GetAccountId(), product->Price,
+                    Trinity::StringFormat("Магазин Forever: {}", product->Name),
+                    Trinity::StringFormat("shop-purchase-{}", pending.PurchaseID));
 
-            LoginDatabase.DirectPExecute("UPDATE account_shop_points SET Points = Points - {} WHERE AccountID = {} AND Points >= {}",
-                product->Price, GetAccountId(), product->Price);
-            LoginDatabase.PExecute("INSERT INTO shop_purchase_log (AccountID, ProductID, Price, CharacterGUID) VALUES ({}, {}, {}, {})",
-                GetAccountId(), product->ID, product->Price, pending.Target.GetCounter());
-            points -= product->Price;
+                if (!debit.ok)
+                {
+                    result = ShopPurchaseResultError;
+                    if (_player)
+                    {
+                        if (debit.code == -2)
+                            ChatHandler(this).SendSysMessage("Shop: this game account is not linked to a site account. Link it on the site before buying.");
+                        else if (debit.code == -3)
+                            ChatHandler(this).SendSysMessage("Shop: not enough shop points.");
+                        else
+                            ChatHandler(this).SendSysMessage("Shop: could not charge shop points. Please try again later.");
+                    }
+                }
+                else
+                {
+                    LoginDatabase.PExecute("INSERT INTO shop_purchase (`PurchaseID`, `AccountID`, `ProductID`, `Price`, `TargetGUID`, `Status`) "
+                        "VALUES ({}, {}, {}, {}, {}, 'charged')",
+                        pending.PurchaseID, GetAccountId(), product->ID, product->Price, pending.Target.GetCounter());
 
-            ApplyShopProduct(*product, _player, pending.Target, GetAccountId());
-            if (std::ranges::any_of(product->Actions, [](ShopProductAction const& action) { return action.Action == ShopAction::BoostToken; }))
-                SendShopDistributionList();     // the new boost button on the character screen
+                    if (listing)
+                    {
+                        // Gold Market: the listing is gone once bought; the seller's account gets the price minus the fee
+                        CharacterDatabase.DirectPExecute("DELETE FROM shop_gold_listing WHERE ID = {}", listing->ID);
+                        // fee percent from auth.shop_config (support site GM part), else the config; at least 1 point while the percent is not 0
+                        int32 feePercent = sConfigMgr->GetIntDefault("Classic.Shop.GoldMarketFee", 10);
+                        if (QueryResult feeResult = LoginDatabase.Query("SELECT Value FROM shop_config WHERE Name = 'GoldMarketFee'"))
+                            feePercent = Trinity::StringTo<int32>((*feeResult)[0].GetStringView()).value_or(feePercent);
+                        feePercent = std::clamp(feePercent, 0, 100);
+                        uint32 fee = uint32(uint64(listing->Price) * feePercent / 100);
+                        if (feePercent && !fee)
+                            fee = 1;
+                        if (listing->SellerAccount && listing->Price > fee)
+                        {
+                            ShopWallet::Result payout = ShopWallet::Credit(listing->SellerAccount, listing->Price - fee,
+                                Trinity::StringFormat("Gold Market: продажа лота {}", listing->ID),
+                                Trinity::StringFormat("gold-sale-{}", listing->ID));
+                            if (!payout.ok)
+                                TC_LOG_ERROR("entities.player", "Shop: Gold Market payout to account {} failed (code {})",
+                                    listing->SellerAccount, payout.code);
+                        }
+                        TC_LOG_INFO("entities.player", "Shop: Gold Market listing {} ({} gold, {} points, fee {}) of account {} sold to account {}",
+                            listing->ID, listing->Gold, listing->Price, fee, listing->SellerAccount, GetAccountId());
+                    }
 
-            TC_LOG_INFO("entities.player", "Shop: account {} bought product {} ({}) for {} points for {}", GetAccountId(), product->ID, product->Name, product->Price, pending.Target.ToString());
-            if (_player)
-                ChatHandler(this).SendSysMessage(Trinity::StringFormat("Shop: thank you for buying {}. You have {} points left.", product->Name, points));
+                    LoginDatabase.PExecute("INSERT INTO shop_purchase_log (AccountID, ProductID, Price, CharacterGUID) VALUES ({}, {}, {}, {})",
+                        GetAccountId(), product->ID, product->Price, pending.Target.GetCounter());
+                    points = debit.balance;
+
+                    try
+                    {
+                        ApplyShopProduct(*product, _player, pending.Target, GetAccountId());
+                        SetShopPurchaseState(pending.PurchaseID, "delivered");
+                        if (std::ranges::any_of(product->Actions, [](ShopProductAction const& action) { return action.Action == ShopAction::BoostToken; }))
+                            SendShopDistributionList();     // the new boost button on the character screen
+
+                        TC_LOG_INFO("entities.player", "Shop: account {} bought product {} ({}) for {} points for {}", GetAccountId(), product->ID, product->Name, product->Price, pending.Target.ToString());
+                        if (_player)
+                            ChatHandler(this).SendSysMessage(Trinity::StringFormat("Shop: thank you for buying {}. You have {} points left.", product->Name, points));
+                    }
+                    catch (...)
+                    {
+                        // delivery failed after the charge: refund the points and keep the state for the audit
+                        TC_LOG_ERROR("entities.player", "Shop: purchase {} delivery failed, refunding {} points to account {}",
+                            pending.PurchaseID, product->Price, GetAccountId());
+                        ShopWallet::Result refund = ShopWallet::Credit(GetAccountId(), product->Price,
+                            Trinity::StringFormat("Возврат покупки {}", pending.PurchaseID),
+                            Trinity::StringFormat("refund-{}", pending.PurchaseID));
+                        SetShopPurchaseState(pending.PurchaseID, "refunded");
+                        points = refund.ok ? refund.balance : GetShopPoints(GetAccountId());
+                        result = ShopPurchaseResultError;
+                        if (_player)
+                            ChatHandler(this).SendSysMessage("Shop: delivery failed, the shop points were refunded.");
+                    }
+                }
+            }
         }
     }
 
