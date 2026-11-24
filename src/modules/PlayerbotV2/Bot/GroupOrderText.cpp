@@ -1,4 +1,7 @@
 #include "GroupOrderText.h"
+// RU-LAYER: a Russian line ("стой", "за мной", "бросить задание X") stands for the English order of BotL10nText.h.
+// Restore/protect: tools/ru-layer/check.ps1, docs/forever-ru-layer.md.
+#include "BotL10nText.h"
 
 #include <algorithm>
 #include <array>
@@ -11,6 +14,12 @@ std::optional<std::string> ClassifyGroupOrder(std::string_view msg, bool owner_w
     if (msg.empty() || msg.front() == ';')
         return std::nullopt;
     std::string order(msg);
+    // RU-LAYER: translate a Russian order line first; the allow-list below then decides on the English order exactly as for a
+    // typed one, so a Russian line is only ever as powerful as the English line it stands for. A Russian line the tables do not
+    // know keeps its own text: the raw Russian aliases below ("по коням", "жди") still match it, everything else is chatter.
+    if (L10n::HasNonAscii(msg))
+        if (std::optional<std::string> const english = L10n::TranslateOrder(msg, /*group*/ true))
+            order = *english;
     std::transform(order.begin(), order.end(), order.begin(), [](unsigned char c) { return char(std::tolower(c)); });
     order.erase(0, order.find_first_not_of(" \t"));
     order.erase(order.find_last_not_of(" \t") + 1);

@@ -7,6 +7,7 @@
 #include "TypedName.h"
 #include <set>
 #include <unordered_set>
+#include <vector>
 
 #include "BattlegroundMgr.h"
 #include "BattlegroundPackets.h"
@@ -81,6 +82,9 @@
 #include "Bot/BotCommandParser.h"   // ApplyLeadOrder for `.bot lead`
 #include "Bot/Formation.h"
 #include "Bot/BotIntentEmitter.h"
+// RU-LAYER: Russian command names and arguments (BotL10nText.h, pure text: word and order tables).
+// Restore/protect: tools/ru-layer/check.ps1, docs/forever-ru-layer.md.
+#include "Bot/BotL10nText.h"
 #include "Threading/IntentQueue.h"
 #include "Combat/ApRegistry.h"
 #include "Bot/BotRegistry.h"
@@ -192,6 +196,13 @@ std::string ToLowerAscii(std::string s)
     return s;
 }
 
+// RU-LAYER: the English word behind a Russian class / role / race / gender / "all" argument (BotL10nText.h), so
+// `.бот добавить воин танк` reads like `.bot add warrior tank`. An English word comes back lower-cased, as ToLowerAscii did.
+std::string ArgWord(std::string const& token)
+{
+    return Playerbot::V2::L10n::ArgWordToEnglish(token);
+}
+
 // Parse a race name OR a numeric race id. Returns 0 on unrecognized input.
 // Aliases match common short forms: 'elf' -> NightElf, 'be' -> BloodElf, etc.
 uint8 ParseRace(std::string const& token)
@@ -199,7 +210,7 @@ uint8 ParseRace(std::string const& token)
     if (token.empty()) return 0;
     if (std::isdigit(static_cast<unsigned char>(token.front())))
         return uint8(std::strtoul(token.c_str(), nullptr, 10));
-    std::string s = ToLowerAscii(token);
+    std::string s = ArgWord(token);   // RU-LAYER: Russian class / race / role words
     if (s == "human")                         return RACE_HUMAN;
     if (s == "orc")                           return RACE_ORC;
     if (s == "dwarf")                         return RACE_DWARF;
@@ -243,7 +254,7 @@ uint8 ParseClass(std::string const& token)
     if (token.empty()) return 0;
     if (std::isdigit(static_cast<unsigned char>(token.front())))
         return uint8(std::strtoul(token.c_str(), nullptr, 10));
-    std::string s = ToLowerAscii(token);
+    std::string s = ArgWord(token);   // RU-LAYER: Russian class / race / role words
     if (s == "warrior")                          return CLASS_WARRIOR;
     if (s == "paladin"   || s == "pala")         return CLASS_PALADIN;
     if (s == "hunter"    || s == "hunt")         return CLASS_HUNTER;
@@ -813,10 +824,43 @@ public:
             { "bgstress",      HandleBotBgStress,   rbac::RBAC_PERM_COMMAND_GM, Console::Yes },
             { "bgsoak",        HandleBotBgSoak,     rbac::RBAC_PERM_COMMAND_GM, Console::Yes },
         };
+        // RU-LAYER: the same player-facing commands under Russian names (`.бот добавить воин танк`, `.бот вызвать все`,
+        // `.бот распустить все`). Same handlers and permissions as the English table above. The chat parser compares command
+        // names case-insensitively for ASCII only, so the names are written lower-case and the root has its capitalised spelling
+        // as a second row. Keep this table in step with botTable when commands are added or removed.
+        static ChatCommandTable botTableRu =
+        {
+            { "о",             HandleBotAbout,      rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::Yes },
+            { "справка",       HandleBotAbout,      rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::Yes },
+            { "добавить",      HandleBotAdd,        rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "добавь",        HandleBotAdd,        rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "вызвать",       HandleBotCall,       rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "вызови",        HandleBotCall,       rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "собрать",       HandleBotSummon,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "собери",        HandleBotSummon,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "распустить",    HandleBotDismiss,    rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "распусти",      HandleBotDismiss,    rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "отпустить",     HandleBotDismiss,    rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "экипировка",    HandleBotRegear,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "переодеть",     HandleBotRegear,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "переодень",     HandleBotRegear,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "сохранить",     HandleBotSave,       rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "сохрани",       HandleBotSave,       rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "забыть",        HandleBotUnsave,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "забудь",        HandleBotUnsave,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "убрать",        HandleBotUnsave,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "удалить",       HandleBotDelete,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "удали",         HandleBotDelete,     rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "список",        HandleBotList,       rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+            { "язык",          HandleBotLanguage,   rbac::RBAC_PERM_JOIN_NORMAL_BG, Console::No  },
+        };
         static ChatCommandTable root =
         {
             { "playerbot", v2Table },
             { "bot",       botTable },
+            // RU-LAYER: the Russian root, `.бот ...` (the parser only folds ASCII case, so the capitalised form is its own row).
+            { "бот",       botTableRu },
+            { "Бот",       botTableRu },
             // `.w <name> <text>` / `.tell <name> <text>`: whisper as a chat command. The 70205 client has no working /w, and inside
             // battlegrounds the addon's whisper is blocked (Karrz 2026-10-08, WSG: SAY packets and dot commands go through,
             // whispers never leave the client). Every player.
@@ -1080,8 +1124,10 @@ public:
     }
 
     // .bot add <class> [tank|healer|dps] [race] [male|female]
+    // RU-LAYER: Russian words work too (`.бот добавить жрец лекарь`), and a two-word race ("ночной эльф") takes two of
+    // the four optional slots.
     static bool HandleBotAdd(ChatHandler* handler, std::string const& class_arg, Optional<std::string> arg2,
-                             Optional<std::string> arg3, Optional<std::string> arg4)
+                             Optional<std::string> arg3, Optional<std::string> arg4, Optional<std::string> arg5)
     {
         Playerbot::BotLanguage::LocalizedHandler localized(handler); handler = localized.Get();   // replies in the player's language
         if (!Playerbot::Services::Initialized())
@@ -1113,15 +1159,23 @@ public:
             return Refuse(handler);
         }
 
-        // The optional words can come in any order: a role, a race, a gender.
+        // The optional words can come in any order: a role, a race, a gender. A race of two words is joined first.
+        std::vector<std::string> words;
+        for (Optional<std::string> const* arg : { &arg2, &arg3, &arg4, &arg5 })
+            if (*arg)
+                words.push_back(Playerbot::V2::L10n::FoldRu(**arg));
+        for (size_t i = 0; i + 1 < words.size(); ++i)
+            if (std::string joined = Playerbot::V2::L10n::JoinRaceWords(words[i], words[i + 1]); !joined.empty())
+            {
+                words[i] = std::move(joined);
+                words.erase(words.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+            }
         Playerbot::Role role = Playerbot::Role::Unknown;
         uint8 race = 0;
         uint8 gender = uint8(urand(GENDER_MALE, GENDER_FEMALE));
-        for (Optional<std::string> const* arg : { &arg2, &arg3, &arg4 })
+        for (std::string const& typed : words)
         {
-            if (!*arg)
-                continue;
-            std::string const word = ToLowerAscii(**arg);
+            std::string const word = ArgWord(typed);
             bool is_role = false;
             Playerbot::Role const r = ParseRoleWord(word, is_role);
             if (is_role) { role = r; continue; }
@@ -1130,7 +1184,7 @@ public:
             if (word == "male" || word == "m")     { gender = GENDER_MALE; continue; }
             if (word == "female" || word == "f")   { gender = GENDER_FEMALE; continue; }
             if (uint8 const parsed = ParseRace(word); parsed && IsClassicRace(parsed)) { race = parsed; continue; }
-            handler->PSendSysMessage("Don't know '%s': expected tank, healer, dps, a race, male or female.", word.c_str());
+            handler->PSendSysMessage("Don't know '%s': expected tank, healer, dps, a race, male or female.", typed.c_str());
             return Refuse(handler);
         }
 
@@ -1183,7 +1237,7 @@ public:
     static std::vector<Playerbot::BotId> CompanionsMatching(WorldSession const* sess, std::string const& who)
     {
         std::vector<Playerbot::BotId> out;
-        std::string const want = ToLowerAscii(who);
+        std::string const want = ArgWord(who);   // RU-LAYER: «все» reads as "all"
         for (Playerbot::BotId id : Playerbot::Services::Owners().BotsOwnedBy(sess->GetAccountId()))
         {
             if (!Playerbot::Services::Lifecycle().is_bot(id))
@@ -1236,7 +1290,7 @@ public:
         Player* me = sess ? sess->GetPlayer() : nullptr;
         if (!me)
         { handler->SendSysMessage("`.bot call` is in-game only."); return Refuse(handler); }
-        bool const roster = ToLowerAscii(who) == "all";
+        bool const roster = ArgWord(who) == "all";
         std::vector<Playerbot::BotId> ids;
         if (roster && groupOnly)
         {
@@ -1344,12 +1398,12 @@ public:
         bool const init = Playerbot::Services::Initialized();
         // `saved` = the saved roster (`.bot save`) plus the grouped bots, logged in if need be: the addon's "Call saved" button.
         // `.bot call all` is the same.
-        if (init && ToLowerAscii(who) == "saved")
+        if (init && ArgWord(who) == "saved")
         {
             CallCompanions(handler, "all", /*groupOnly*/ false);
             return true;
         }
-        if (init && !who.empty() && (ToLowerAscii(who) == "all" || !CompanionsMatching(sess, who).empty()))
+        if (init && !who.empty() && (ArgWord(who) == "all" || !CompanionsMatching(sess, who).empty()))
         {
             CallCompanions(handler, who, /*groupOnly*/ true);
             return true;
@@ -1376,7 +1430,7 @@ public:
         std::string who(args);
         while (!who.empty() && (who.back() == ' ' || who.back() == '\t')) who.pop_back();
         while (!who.empty() && (who.front() == ' ' || who.front() == '\t')) who.erase(who.begin());
-        if (who.empty() || ToLowerAscii(who) == "all")
+        if (who.empty() || ArgWord(who) == "all")
         { handler->SendSysMessage(".bot goto <bot name>: takes you to one of your bots."); return Refuse(handler); }
         auto const ids = CompanionsMatching(sess, who);
         if (ids.empty())
@@ -1497,7 +1551,7 @@ public:
         Player* me = sess ? sess->GetPlayer() : nullptr;
         if (!me)
         { handler->SendSysMessage("`.bot regear` is in-game only."); return false; }
-        bool const roster = ToLowerAscii(who) == "all";
+        bool const roster = ArgWord(who) == "all";
         auto const ids = roster ? SavedCompanions(sess) : CompanionsMatching(sess, who);
         if (ids.empty() && roster)
         { handler->SendSysMessage("No saved or grouped companions. `.bot regear <name>` regears one."); return false; }
@@ -1556,7 +1610,7 @@ public:
             handler->SetSentErrorMessage(true);
             return false;
         }
-        bool const all = ToLowerAscii(typed) == "all";
+        bool const all = ArgWord(typed) == "all";
         std::string const name = all ? std::string("all") : TypedCharacterName(typed);
         std::vector<Playerbot::BotId> ids = name.empty() ? std::vector<Playerbot::BotId>{} : CompanionsMatching(sess, name);
         // An alt of the caller's own account that is in world as a bot is theirs to dismiss even when its owner binding is gone.
@@ -1611,7 +1665,7 @@ public:
         Player* me = sess ? sess->GetPlayer() : nullptr;
         if (!me)
             return false;
-        bool const with_me = ToLowerAscii(who) == "all";
+        bool const with_me = ArgWord(who) == "all";
         std::string names;
         uint32 saved = 0;
         // Save group REPLACES the saved roster (playtest, 2026-10-11: after a second save the call said 78 saved where the first said 39: the
@@ -1710,7 +1764,7 @@ public:
         WorldSession* sess = handler->GetSession();
         if (!sess)
             return false;
-        if (ToLowerAscii(who) == "all")
+        if (ArgWord(who) == "all")
         { handler->SendSysMessage("`.bot delete` takes one name at a time."); return false; }
         auto const ids = CompanionsMatching(sess, who);
         if (ids.empty())

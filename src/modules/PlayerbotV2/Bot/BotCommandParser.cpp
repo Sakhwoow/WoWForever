@@ -29,6 +29,9 @@
 #include "../Fleet/PlayerCraftOrders.h"
 #include "../Api/BotTradeShop.h"   // CountBagRot for "sell junk"
 #include "BotAddressResolver.h"
+// RU-LAYER: Russian orders ("стой", "танки: тяни", "бросить задание X") read as the English orders of BotL10nText.h.
+// Restore/protect: tools/ru-layer/check.ps1, docs/forever-ru-layer.md.
+#include "BotL10nText.h"
 #include "Placement.h"
 #include "ClassicUpkeep.h"   // Classic::IsMeleeSpec for the Positions tab order
 #include "../Diagnostics/BotInspector.h"
@@ -2758,29 +2761,36 @@ void BotCommandParser::TickRaidResets()
 bool BotCommandParser::Dispatch(Player* sender, Player* bot, std::string const& msg, char const* via)
 {
     if (!sender || !bot) return false;
+    // RU-LAYER: a Russian order ("стой", "танки: тяни", "бросить задание X") runs as the English order it stands for
+    // (BotL10nText.h): the address prefix and the verb are translated, the rest of this function and the whole parser below see
+    // English. Any other text, every English order included, goes on unchanged.
+    std::optional<std::string> const english = Playerbot::V2::L10n::HasNonAscii(msg)
+        ? Playerbot::V2::L10n::TranslateOrder(msg, /*group*/ false)
+        : std::optional<std::string>{};
+    std::string const& text = english ? *english : msg;
     // "ignore target" / "ignore clear" are the owner's list, like the crowd-control orders: stored once, answered once.
-    if (ApplyIgnoreOrder(sender, msg, via))
+    if (ApplyIgnoreOrder(sender, text, via))
         return true;
     // "place <shape> ..." (the Positions tab's words typed or whispered): the owner's whole set at once, answered once.
-    if (ApplyPlaceOrder(sender, msg, via))
+    if (ApplyPlaceOrder(sender, text, via))
         return true;
-    if (ApplyRaidResetOrder(sender, msg, via))
+    if (ApplyRaidResetOrder(sender, text, via))
         return true;
     // "lead on|pause|off": the whole group's lead, set on every bot of the sender's at once, answered once.
-    if (ApplyLeadOrder(sender, msg, via))
+    if (ApplyLeadOrder(sender, text, via))
         return true;
     // Stay / Hold / Follow / Come while the tank leads pause the lead; the order itself goes on as usual.
-    PauseLeadForOwnerOrder(sender, msg, via);
+    PauseLeadForOwnerOrder(sender, text, via);
     // A crowd-control order ("@warlock no fear", "off cc") is the owner's, not each bot's: stored once, answered once.
-    if (ApplyCcOrder(sender, msg, via))
+    if (ApplyCcOrder(sender, text, via))
         return true;
     // A boss plan ("tactics Lucifron: adds first, no aoe") is the owner's too.
-    if (ApplyTacticsOrder(sender, msg, via))
+    if (ApplyTacticsOrder(sender, text, via))
         return true;
     // Resolve squad-address prefix (all:/tank:/mage:/Areon:/...).
     // Single-recipient is the most common path — short-circuit so we
     // don't pay the snapshot lookups when the owner just `/w Areon come`.
-    ResolvedAddress addr = BotAddressResolver::Resolve(sender, bot, msg);
+    ResolvedAddress addr = BotAddressResolver::Resolve(sender, bot, text);
     if (addr.kind == ResolvedAddress::Kind::Single)
     {
         // No prefix — direct dispatch on the whispered bot. Authority
@@ -2793,8 +2803,9 @@ bool BotCommandParser::Dispatch(Player* sender, Player* bot, std::string const& 
             ~DirectGuard() { t_direct_whisper = prev; }
         } guard(via && std::strcmp(via, "whisper") == 0);
         if (t_direct_whisper)
-            TC_LOG_INFO("playerbot.v2", "[owner_order] whisper {} <- {}: \"{}\"", bot->GetName(), sender->GetName(), msg);
-        return DispatchSingle(sender, bot, msg, via);
+            TC_LOG_INFO("playerbot.v2", "[owner_order] whisper {} <- {}: \"{}\"{}", bot->GetName(), sender->GetName(), msg,
+                        english ? " (Russian, read as \"" + *english + "\")" : std::string());
+        return DispatchSingle(sender, bot, text, via);
     }
     // Prefix matched — apply to the resolved set. Reply once via the
     // whispered bot with a summary; per-bot acks would flood the chat.

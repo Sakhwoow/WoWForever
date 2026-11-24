@@ -507,3 +507,38 @@ Conjure Water / Conjure Food rank. `water` / `drink` and `food` (also the Russia
 those ranks by the spell data, so they work whatever language the server's item names are in. Of the items a name fits, the best one you are high enough to use is made. Conjured items cannot go
 by mail: the bot asks you to open a trade with it and puts them in the window.
 A bare `craft <spell id>` is the older owner command and still casts that recipe once. Idea and parser from Trixx34/ForeverBots (GPL-2.0).
+
+## 15. Russian commands and orders (`.бот`)
+
+The commands of section 2 and 4 also work in Russian: the root is `.бот` (`.Бот` also), the handlers and permissions are
+exactly the ones of the English commands. Replies come in the player's language anyway (`.bot language auto|en|ru` or the
+client's own language), so with a Russian client a `.bot add ...` answers in Russian.
+
+| Russian | English | Example |
+|---|---|---|
+| `.бот о` / `.бот справка` | `.bot about` | |
+| `.бот добавить` / `добавь` | `.bot add` | `.бот добавить жрец лекарь`, `.бот добавить воин танк орк мужской`, `.бот добавить друид лекарь ночной эльф` |
+| `.бот вызвать` / `вызови` | `.bot call` | `.бот вызвать все` |
+| `.бот собрать` / `собери` | `.bot summon` | `.бот собрать сохранённые` |
+| `.бот распустить` / `распусти` / `отпустить` | `.bot dismiss` | `.бот распустить все` |
+| `.бот экипировка` / `переодеть` / `переодень` | `.bot regear` | `.бот переодеть все` |
+| `.бот сохранить` / `сохрани` | `.bot save` | `.бот сохранить все` |
+| `.бот забыть` / `забудь` / `убрать` | `.bot unsave` | |
+| `.бот удалить` / `удали` | `.bot delete` | |
+| `.бот список` | `.bot list` | |
+| `.бот язык` | `.bot language` | `.бот язык ru` |
+
+Arguments: classes (`воин`, `паладин`, `охотник`, `разбойник`, `жрец`, `шаман`, `маг`, `чернокнижник`, `друид`), roles
+(`танк`, `лекарь`/`хил`, `урон`/`дд`), races (`человек`, `орк`, `дворф`/`гном`…, `ночной эльф`, `эльф крови`, `нежить`,
+`таурен`, `тролль`), gender (`мужской`/`м`, `женский`/`ж`), `все`, `сохранённые`.
+
+Orders to the bots may also be Russian — in a whisper, after `;` in the party line and as a bare line in party/raid chat:
+`за мной`, `стой`, `держать`, `защита`, `агрессия`, `пассив`, `продолжай`, `атака`, `помоги`, `тяни`, `тяни назад`,
+`отход`, `беги`, `ко мне`, `отпусти`, `стоп`, `задания`, `принять`, `сдать`, `бросить задание <название>`, `поделиться`,
+`надеть улучшения`, `создать <предмет>`, формации и дистанция, `главный танк`, and the addresses `все:`, `танки:`,
+`лекари:`, `дд:`, `маги:`, `<Имя>:`. A Russian phrase is turned into the English order before parsing, so the English
+allow-list still decides what counts as an order in party chat (a bare `стой` does, `стой, куда ты побежал` does not).
+
+The layer lives in `Bot/BotL10nText.h` plus `RU-LAYER` marked spots in `Commands/cs_playerbot_v2.cpp`,
+`Bot/BotCommandParser.cpp` and `Bot/GroupOrderText.cpp`; `tools/ru-layer/check.ps1` verifies it is still there after an
+upstream merge (see `docs/forever-ru-layer.md` in the workspace).
