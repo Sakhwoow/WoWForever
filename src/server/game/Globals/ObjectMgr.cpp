@@ -65,6 +65,7 @@
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "SpellScript.h"
+#include "Config.h"
 #include "StringConvert.h"
 #include "TemporarySummon.h"
 #include "TerrainMgr.h"
@@ -841,14 +842,38 @@ void ObjectMgr::LoadShop()
     _shopGroupStore.clear();
     _shopProductStore.clear();
 
-    //                                               0   1     2               3
+    // Realm-scoped catalog. `Classic.Shop.RealmId` is this world's own realm id (PvE 70, HC 73; 0 = load everything).
+    // `Realms` in shop_group / shop_product is a comma-separated list of realm ids; 0 or an empty value means "every realm".
+    uint32 const shopRealmId = uint32(sConfigMgr->GetIntDefault("Classic.Shop.RealmId", 0));
+    auto realmAllowed = [shopRealmId](std::string const& realms)
+    {
+        if (shopRealmId == 0 || realms.empty() || realms == "0")
+            return true;
+        size_t start = 0;
+        while (start <= realms.size())
+        {
+            size_t const comma = realms.find(',', start);
+            std::string_view const token = std::string_view(realms).substr(start,
+                comma == std::string::npos ? std::string::npos : comma - start);
+            if (Optional<uint32> const realm = Trinity::StringTo<uint32>(token); realm && *realm == shopRealmId)
+                return true;
+            if (comma == std::string::npos)
+                break;
+            start = comma + 1;
+        }
+        return false;
+    };
+
+    //                                               0   1     2               3         4
     // Enabled = 0 hides the tab from the client; products of such a group are skipped below
     // because their GroupID is not in _shopGroupStore.
-    if (QueryResult result = WorldDatabase.Query("SELECT ID, Name, IconFileDataID, Ordering FROM shop_group WHERE Enabled = 1"))
+    if (QueryResult result = WorldDatabase.Query("SELECT ID, Name, IconFileDataID, Ordering, Realms FROM shop_group WHERE Enabled = 1"))
     {
         do
         {
             Field* fields = result->Fetch();
+            if (!realmAllowed(fields[4].GetString()))
+                continue;
             ShopGroup& group = _shopGroupStore[fields[0].GetUInt32()];
             group.ID = fields[0].GetUInt32();
             group.Name = fields[1].GetString();
@@ -857,8 +882,8 @@ void ObjectMgr::LoadShop()
         } while (result->NextRow());
     }
 
-    //                                               0   1        2     3            4               5      6            7
-    if (QueryResult result = WorldDatabase.Query("SELECT ID, GroupID, Name, Description, IconFileDataID, Price, NormalPrice, Ordering FROM shop_product WHERE Enabled = 1"))
+    //                                               0   1        2     3            4               5      6            7         8
+    if (QueryResult result = WorldDatabase.Query("SELECT ID, GroupID, Name, Description, IconFileDataID, Price, NormalPrice, Ordering, Realms FROM shop_product WHERE Enabled = 1"))
     {
         do
         {
@@ -870,6 +895,8 @@ void ObjectMgr::LoadShop()
                 TC_LOG_ERROR("sql.sql", "Table `shop_product`: product {} has non-existing GroupID {}, skipped.", id, groupId);
                 continue;
             }
+            if (!realmAllowed(fields[8].GetString()))
+                continue;
 
             ShopProduct& product = _shopProductStore[id];
             product.ID = id;
