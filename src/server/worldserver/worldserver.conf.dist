@@ -5399,6 +5399,14 @@ Classic.ScourgeInvasion.ShardDamageRate = 1.0
 
 Classic.Shop.Enabled = 0
 
+#    Classic.Shop.CurrencyID
+#        Description: Which currency the character-screen store shows next to a price (the client's currency info:
+#                     1 = US, 2 = EU, 3 = KR, 4 = TW, 5 = CN, 6 = SG; 0 = the client's own fallback). Purely cosmetic:
+#                     the amount charged is always the product price in shop points.
+#        Default:     1
+
+Classic.Shop.CurrencyID = 1
+
 #    Classic.Shop.GoldMarketFee
 #        Description: Percent of the price in shop points kept back from the seller when a Gold Market listing sells.
 #        Default:     10
