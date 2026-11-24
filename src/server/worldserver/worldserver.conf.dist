@@ -5405,6 +5405,13 @@ Classic.Shop.Enabled = 0
 #        Default:     1
 
 Classic.Shop.CurrencyID = 1
+#    Classic.Shop.RealmId
+#        Description: This world's own realm id (realmlist.id): PvE 70, HC 73. Used by the in-game Store to pick the
+#                     catalog rows that belong to this realm - shop_group.Realms / shop_product.Realms is a comma
+#                     separated list of realm ids, 0 or empty = every realm. 0 here disables the filter (load all).
+#        Default:     0
+
+Classic.Shop.RealmId = 0
 
 #    Classic.Shop.GoldMarketFee
 #        Description: Percent of the price in shop points kept back from the seller when a Gold Market listing sells.
