@@ -484,6 +484,10 @@ void WorldSession::SendShopProductList()
     // Currency shown next to a price: 1 = US ($), 2 = EU, 3 = KR ... (client's store currency info). Configurable so a
     // realm can try another one without a code change; 0 = whatever the client falls back to.
     response.CurrencyID = enabled ? uint32(sConfigMgr->GetIntDefault("Classic.Shop.CurrencyID", 1)) : 0;
+    // Display flags for every product card, straight from the client's BattlepayDisplayFlags enum:
+    // 0 = client default (round icon frame), 8 = UseSquareIconBorder (square frame, item icon corners visible),
+    // other bits = CardAlwaysShowsTexture / CardDoesNotShowModel / HiddenPrice etc. Configurable for experiments.
+    uint32 const displayFlags = enabled ? uint32(sConfigMgr->GetIntDefault("Classic.Shop.DisplayFlags", 0)) : 0;
 
     if (enabled)
     {
@@ -503,6 +507,8 @@ void WorldSession::SendShopProductList()
             display.FileDataID = shopProduct.IconFileDataID;
             display.Name1 = shopProduct.Name;
             display.Name3 = shopProduct.Description;
+            if (displayFlags)
+                display.Flags = displayFlags;
 
             WorldPackets::BattlePay::Product& product = response.Products.emplace_back();
             product.ProductID = shopProduct.ID;
@@ -558,6 +564,8 @@ void WorldSession::SendShopProductList()
                 display.FileDataID = listingProduct.IconFileDataID;
                 display.Name1 = listingProduct.Name;
                 display.Name3 = listingProduct.Description;
+                if (displayFlags)
+                    display.Flags = displayFlags;
 
                 WorldPackets::BattlePay::Product& product = response.Products.emplace_back();
                 product.ProductID = listingProduct.ID;

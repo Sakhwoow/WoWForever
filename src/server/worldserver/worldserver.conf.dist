@@ -5405,6 +5405,14 @@ Classic.Shop.Enabled = 0
 #        Default:     1
 
 Classic.Shop.CurrencyID = 1
+#    Classic.Shop.DisplayFlags
+#        Description: BattlepayDisplayFlags sent with every product card (client enum):
+#                     0  = client default, round icon frame
+#                     8  = UseSquareIconBorder - square frame, item icon corners visible
+#                     1  = CardAlwaysShowsTexture, 2 = CardDoesNotShowModel, 64 = HiddenPrice (see client StoreUI)
+#        Default:     0
+
+Classic.Shop.DisplayFlags = 0
 #    Classic.Shop.RealmId
 #        Description: This world's own realm id (realmlist.id): PvE 70, HC 73. Used by the in-game Store to pick the
 #                     catalog rows that belong to this realm - shop_group.Realms / shop_product.Realms is a comma
