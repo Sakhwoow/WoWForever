@@ -883,7 +883,7 @@ void ObjectMgr::LoadShop()
     }
 
     //                                               0   1        2     3            4               5      6            7         8
-    if (QueryResult result = WorldDatabase.Query("SELECT ID, GroupID, Name, Description, IconFileDataID, Price, NormalPrice, Ordering, Realms FROM shop_product WHERE Enabled = 1"))
+    if (QueryResult result = WorldDatabase.Query("SELECT ID, GroupID, Name, Description, IconFileDataID, Price, NormalPrice, Ordering, Realms, DisplayFlags FROM shop_product WHERE Enabled = 1"))
     {
         do
         {
@@ -909,6 +909,7 @@ void ObjectMgr::LoadShop()
             product.Price = fields[5].GetUInt32();
             product.NormalPrice = fields[6].GetUInt32();
             product.Ordering = fields[7].GetInt32();
+            product.DisplayFlags = fields[9].GetUInt32();
         } while (result->NextRow());
     }
 
