@@ -683,6 +683,7 @@ struct ShopProduct
     uint32 Price = 0;           // shop points
     uint32 NormalPrice = 0;     // crossed-out price, 0 = no sale
     int32 Ordering = 0;
+    uint32 DisplayFlags = 0;    // BattlepayDisplayFlags for the card; 0 = use Classic.Shop.DisplayFlags
     std::vector<ShopProductAction> Actions;
     bool InGameOnly = false;    // has actions that need the character in game (anything but items)
 };

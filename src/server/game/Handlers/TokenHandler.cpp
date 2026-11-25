@@ -507,8 +507,10 @@ void WorldSession::SendShopProductList()
             display.FileDataID = shopProduct.IconFileDataID;
             display.Name1 = shopProduct.Name;
             display.Name3 = shopProduct.Description;
-            if (displayFlags)
-                display.Flags = displayFlags;
+            // per-product flags win over the global default (used for testing which bit is the square border)
+            uint32 const productDisplayFlags = shopProduct.DisplayFlags ? shopProduct.DisplayFlags : displayFlags;
+            if (productDisplayFlags)
+                display.Flags = productDisplayFlags;
 
             WorldPackets::BattlePay::Product& product = response.Products.emplace_back();
             product.ProductID = shopProduct.ID;
