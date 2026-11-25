@@ -5407,10 +5407,11 @@ Classic.Shop.Enabled = 0
 
 Classic.Shop.CurrencyID = 1
 #    Classic.Shop.DisplayFlags
-#        Description: BattlepayDisplayFlags sent with every product card (client enum):
-#                     0  = client default, round icon frame
-#                     8  = UseSquareIconBorder - square frame, item icon corners visible
-#                     1  = CardAlwaysShowsTexture, 2 = CardDoesNotShowModel, 64 = HiddenPrice (see client StoreUI)
+#        Description: BattlepayDisplayFlags sent with every product card (client enum, 12 bits 1..2048):
+#                     0   = client default (round icon frame)
+#                     128 = UseSquareIconBorder - square frame, square item icon (found empirically 25.11.2026)
+#                     Other bits belong to the client's Blizzard_StoreUI (texture/model/hidden price modes).
+#                     A product can override this with shop_product.DisplayFlags.
 #        Default:     0
 
 Classic.Shop.DisplayFlags = 0
