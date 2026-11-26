@@ -72,7 +72,7 @@ public:
     static bool HandleReloadCommand(ChatHandler* handler)
     {
         sObjectMgr->LoadShop();
-        handler->PSendSysMessage("OK shop reloaded: %u tabs, %u products", uint32(sObjectMgr->GetShopGroups().size()), uint32(sObjectMgr->GetShopProducts().size()));
+        handler->PSendSysMessage("OK магазин перезагружен: %u вкладок, %u товаров", uint32(sObjectMgr->GetShopGroups().size()), uint32(sObjectMgr->GetShopProducts().size()));
         return true;
     }
 
@@ -89,7 +89,7 @@ public:
             player = PlayerIdentifier::FromTargetOrSelf(handler);
         if (!player)
         {
-            handler->SendSysMessage("Usage: .shop points <amount> [character] (or target a player)");
+            handler->SendSysMessage("Использование: .shop points <количество> [персонаж] (или выберите игрока)");
             handler->SetSentErrorMessage(true);
             return false;
         }
@@ -97,7 +97,7 @@ public:
         uint32 accountId = sCharacterCache->GetCharacterAccountIdByGuid(player->GetGUID());
         if (!accountId)
         {
-            handler->SendSysMessage("ERROR unknown character");
+            handler->SendSysMessage("ERROR неизвестный персонаж");
             handler->SetSentErrorMessage(true);
             return false;
         }
@@ -106,16 +106,16 @@ public:
         {
             std::string key = Trinity::StringFormat("gm-{}-{}", accountId, urand(1, 100000000));
             ShopWallet::Result result = amount > 0
-                ? ShopWallet::Credit(accountId, uint32(amount), "GM shop points adjustment", key)
-                : ShopWallet::Debit(accountId, uint32(-amount), "GM shop points adjustment", key);
+                ? ShopWallet::Credit(accountId, uint32(amount), "Корректировка бонусов ГМ", key)
+                : ShopWallet::Debit(accountId, uint32(-amount), "Корректировка бонусов ГМ", key);
             if (!result.ok)
             {
                 if (result.code == -2)
-                    handler->SendSysMessage("ERROR the account is not linked to a site account (link it on azeroth.su: Магазин → Forever в клиенте → Бонусы)");
+                    handler->SendSysMessage("ERROR аккаунт не привязан к аккаунту на сайте (привяжите на azeroth.su: Магазин → Forever в клиенте → Бонусы)");
                 else if (result.code == -3)
-                    handler->SendSysMessage("ERROR not enough shop points");
+                    handler->SendSysMessage("ERROR недостаточно бонусов");
                 else
-                    handler->SendSysMessage("ERROR could not change shop points (database error)");
+                    handler->SendSysMessage("ERROR не удалось изменить бонусы (ошибка базы)");
                 handler->SetSentErrorMessage(true);
                 return false;
             }
@@ -123,7 +123,7 @@ public:
 
         uint32 points = GetPoints(accountId);
 
-        handler->PSendSysMessage("OK %s: %d points, account %u now has %u.", player->GetName().c_str(), amount, accountId, points);
+        handler->PSendSysMessage("OK %s: %d бонусов, на аккаунте %u теперь %u.", player->GetName().c_str(), amount, accountId, points);
         if (Player* target = player->GetConnectedPlayer())
             if (target->GetSession() != handler->GetSession())
                 ChatHandler(target->GetSession()).SendSysMessage(Trinity::StringFormat("Магазин: вы получили {} бонусов. У вас {} бонусов.", amount, points));
@@ -138,7 +138,7 @@ public:
             player = PlayerIdentifier::FromTargetOrSelf(handler);
         if (!player)
         {
-            handler->SendSysMessage("Usage: .shop boost [character] [type] (or target a player)");
+            handler->SendSysMessage("Использование: .shop boost [персонаж] [тип] (или выберите игрока)");
             handler->SetSentErrorMessage(true);
             return false;
         }
@@ -146,13 +146,13 @@ public:
         uint32 accountId = sCharacterCache->GetCharacterAccountIdByGuid(player->GetGUID());
         if (!accountId)
         {
-            handler->SendSysMessage("ERROR unknown character");
+            handler->SendSysMessage("ERROR неизвестный персонаж");
             handler->SetSentErrorMessage(true);
             return false;
         }
 
         LoginDatabase.DirectPExecute("INSERT INTO account_boost_token (AccountID, BoostType, Source) VALUES ({}, {}, 'gm')", accountId, boostType.value_or(6));
-        handler->PSendSysMessage("OK account %u of %s got a character boost token (type %u); it shows on the character screen.",
+        handler->PSendSysMessage("OK аккаунт %u игрока %s получил токен буста (тип %u); кнопка появится на экране персонажей.",
             accountId, player->GetName().c_str(), boostType.value_or(6));
         return true;
     }
@@ -164,7 +164,7 @@ public:
             player = PlayerIdentifier::FromTargetOrSelf(handler);
         if (!player)
         {
-            handler->SendSysMessage("Usage: .shop balance [character] (or target a player)");
+            handler->SendSysMessage("Использование: .shop balance [персонаж] (или выберите игрока)");
             handler->SetSentErrorMessage(true);
             return false;
         }
@@ -172,12 +172,12 @@ public:
         uint32 accountId = sCharacterCache->GetCharacterAccountIdByGuid(player->GetGUID());
         if (!accountId)
         {
-            handler->SendSysMessage("ERROR unknown character");
+            handler->SendSysMessage("ERROR неизвестный персонаж");
             handler->SetSentErrorMessage(true);
             return false;
         }
 
-        handler->PSendSysMessage("OK %s: account %u has %u shop points.", player->GetName().c_str(), accountId, GetPoints(accountId));
+        handler->PSendSysMessage("OK %s: на аккаунте %u %u бонусов.", player->GetName().c_str(), accountId, GetPoints(accountId));
         return true;
     }
 
@@ -187,7 +187,7 @@ public:
         QueryResult result = LoginDatabase.PQuery("SELECT `AccountID`, `Price`, `Status` FROM shop_purchase WHERE `PurchaseID` = {}", purchaseId);
         if (!result)
         {
-            handler->SendSysMessage("ERROR no such purchase");
+            handler->SendSysMessage("ERROR такой покупки нет");
             handler->SetSentErrorMessage(true);
             return false;
         }
@@ -197,7 +197,7 @@ public:
         std::string_view status = (*result)[2].GetStringView();
         if (status == "refunded")
         {
-            handler->SendSysMessage("ERROR this purchase is already refunded");
+            handler->SendSysMessage("ERROR эта покупка уже возвращена");
             handler->SetSentErrorMessage(true);
             return false;
         }
@@ -207,13 +207,13 @@ public:
             Trinity::StringFormat("refund-{}", purchaseId));
         if (!refund.ok)
         {
-            handler->PSendSysMessage("ERROR refund failed (code %d)", refund.code);
+            handler->PSendSysMessage("ERROR возврат не удался (код %d)", refund.code);
             handler->SetSentErrorMessage(true);
             return false;
         }
 
         LoginDatabase.PExecute("UPDATE shop_purchase SET `Status` = 'refunded' WHERE `PurchaseID` = {}", purchaseId);
-        handler->PSendSysMessage("OK purchase %llu refunded: %u points to account %u, balance %u.",
+        handler->PSendSysMessage("OK покупка %llu возвращена: %u бонусов на аккаунт %u, баланс %u.",
             purchaseId, price, accountId, refund.balance);
         TC_LOG_INFO("entities.player", "Shop: purchase {} refunded to account {} ({} points)", purchaseId, accountId, price);
         return true;
@@ -223,27 +223,27 @@ public:
     {
         if (!normalizePlayerName(name))
         {
-            handler->SendSysMessage("ERROR unknown character");
+            handler->SendSysMessage("ERROR неизвестный персонаж");
             return true;
         }
 
         if (gold < 1 || gold > GoldMarketMaxGold || price < GoldMarketMinPrice)
         {
-            handler->PSendSysMessage("ERROR the gold must be 1 to %u and the price at least %u points", GoldMarketMaxGold, GoldMarketMinPrice);
+            handler->PSendSysMessage("ERROR золота должно быть от 1 до %u, цена — не меньше %u бонусов", GoldMarketMaxGold, GoldMarketMinPrice);
             return true;
         }
 
         CharacterCacheEntry const* character = sCharacterCache->GetCharacterCacheByName(name);
         if (!character)
         {
-            handler->SendSysMessage("ERROR unknown character");
+            handler->SendSysMessage("ERROR неизвестный персонаж");
             return true;
         }
 
         // The seller is paid in shop points on the site ledger, so the game account has to be linked to a site account.
         if (!ShopWallet::IsLinked(character->AccountId))
         {
-            handler->SendSysMessage("ERROR the account is not linked to a site account (link it on azeroth.su: Магазин → Forever в клиенте → Бонусы)");
+            handler->SendSysMessage("ERROR аккаунт не привязан к аккаунту на сайте (привяжите на azeroth.su: Магазин → Forever в клиенте → Бонусы)");
             return true;
         }
 
@@ -254,7 +254,7 @@ public:
         {
             if (!player->HasEnoughMoney(copper))
             {
-                handler->SendSysMessage("ERROR the character does not have that much gold");
+                handler->SendSysMessage("ERROR у персонажа нет столько золота");
                 return true;
             }
             player->ModifyMoney(-int64(copper));
@@ -268,7 +268,7 @@ public:
             QueryResult result = CharacterDatabase.PQuery("SELECT money FROM characters WHERE guid = {}", character->Guid.GetCounter());
             if (!result || (*result)[0].GetUInt64() < copper)
             {
-                handler->SendSysMessage("ERROR the character does not have that much gold");
+                handler->SendSysMessage("ERROR у персонажа нет столько золота");
                 return true;
             }
             CharacterDatabase.DirectPExecute("UPDATE characters SET money = money - {} WHERE guid = {}", copper, character->Guid.GetCounter());
@@ -291,7 +291,7 @@ public:
         QueryResult result = CharacterDatabase.PQuery("SELECT SellerGuid, Gold FROM shop_gold_listing WHERE ID = {}", listingId);
         if (!result)
         {
-            handler->SendSysMessage("ERROR no such listing (sold or removed already)");
+            handler->SendSysMessage("ERROR такого лота нет (продан или снят)");
             return true;
         }
 
