@@ -740,9 +740,7 @@ std::string_view CheckShopProduct(ShopProduct const& product, Player const* play
                     return "персонаж должен быть 10 уровня";
                 break;
             case ShopAction::Profession:
-                // only raises a profession the character already has (primary or secondary), it never takes a profession slot
-                if (!player->HasSkill(action.Param1))
-                    return "сначала изучите эту профессию";
+                // the store teaches the profession too: no trainer is needed, a character may keep more than two
                 break;
             case ShopAction::Level:
                 if (player->GetLevel() >= action.Param1)
@@ -757,6 +755,25 @@ std::string_view CheckShopProduct(ShopProduct const& product, Player const* play
         }
     }
     return {};
+}
+
+// the "learn profession" spell of a skill line (the one a trainer teaches): needed when the store gives a profession
+// the character has never trained, so the profession appears in the spellbook and the trade skill window opens
+static uint32 GetProfessionLearnSpell(uint32 skill)
+{
+    switch (skill)
+    {
+        case 171: return 2259;   // Alchemy
+        case 164: return 2018;   // Blacksmithing
+        case 165: return 2108;   // Leatherworking
+        case 182: return 2366;   // Herbalism
+        case 186: return 2575;   // Mining
+        case 197: return 3908;   // Tailoring
+        case 202: return 4036;   // Engineering
+        case 333: return 7411;   // Enchanting
+        case 393: return 8613;   // Skinning
+        default: return 0;
+    }
 }
 
 // items are mailed to target, boost tokens go to the account; everything else is applied to player (in game only, see CheckShopProduct)
@@ -827,8 +844,12 @@ void ApplyShopProduct(ShopProduct const& product, Player* player, ObjectGuid tar
             }
             case ShopAction::Profession:
             {
-                // every recipe of the profession this race and class can learn (both specializations included)
+                // the store teaches the profession too: learn the profession spell first, so the profession window appears
                 uint32 skill = action.Param1;
+                if (!player->HasSkill(skill))
+                    if (uint32 learnSpell = GetProfessionLearnSpell(skill))
+                        if (!player->HasSpell(learnSpell))
+                            player->LearnSpell(learnSpell, false);
                 if (std::vector<SkillLineAbilityEntry const*> const* abilities = sDB2Manager.GetSkillLineAbilitiesBySkill(skill))
                 {
                     for (SkillLineAbilityEntry const* ability : *abilities)
