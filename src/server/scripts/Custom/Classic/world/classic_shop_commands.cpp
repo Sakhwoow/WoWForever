@@ -126,7 +126,7 @@ public:
         handler->PSendSysMessage("OK %s: %d points, account %u now has %u.", player->GetName().c_str(), amount, accountId, points);
         if (Player* target = player->GetConnectedPlayer())
             if (target->GetSession() != handler->GetSession())
-                ChatHandler(target->GetSession()).SendSysMessage(Trinity::StringFormat("Shop: you received {} points. You have {} points.", amount, points));
+                ChatHandler(target->GetSession()).SendSysMessage(Trinity::StringFormat("Магазин: вы получили {} бонусов. У вас {} бонусов.", amount, points));
         TC_LOG_INFO("entities.player", "Shop: {} points for account {} ({}), now {}", amount, accountId, player->GetName(), points);
         return true;
     }
@@ -261,7 +261,7 @@ public:
             CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
             player->SaveInventoryAndGoldToDB(trans);
             CharacterDatabase.CommitTransaction(trans);
-            ChatHandler(player->GetSession()).SendSysMessage(Trinity::StringFormat("Shop: {} gold was listed on the Gold Market.", gold));
+            ChatHandler(player->GetSession()).SendSysMessage(Trinity::StringFormat("Магазин: {} золота выставлено на Золотой рынок.", gold));
         }
         else
         {
@@ -305,7 +305,7 @@ public:
         {
             ObjectGuid seller = ObjectGuid::Create<HighGuid::Player>(sellerGuid);
             CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
-            MailDraft("Gold Market", Trinity::StringFormat("Your Gold Market listing of {} gold was removed. Here is your gold.", gold))
+            MailDraft("Золотой рынок", Trinity::StringFormat("Ваш лот на Золотом рынке ({} золота) снят. Золото возвращено.", gold))
                 .AddMoney(uint64(gold) * GOLD)
                 .SendMailTo(trans, MailReceiver(ObjectAccessor::FindConnectedPlayer(seller), sellerGuid), MailSender(MAIL_NORMAL, UI64LIT(0), MAIL_STATIONERY_GM), MAIL_CHECK_MASK_NOT_RETURNABLE);
             CharacterDatabase.CommitTransaction(trans);
