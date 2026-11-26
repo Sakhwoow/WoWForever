@@ -100,8 +100,8 @@ ShopProduct MakeGoldListingProduct(GoldListing const& listing)
     ShopProduct product;
     product.ID = GoldMarketProductBase + listing.ID;
     product.GroupID = GoldMarketGroupID;
-    product.Name = Trinity::StringFormat("{} Gold", listing.Gold);
-    product.Description = "Gold offered by another player, for this character.";
+    product.Name = Trinity::StringFormat("{} золота", listing.Gold);
+    product.Description = "Золото от другого игрока для этого персонажа.";
     product.IconFileDataID = 133784;    // inv_misc_coin_01
     product.Price = listing.Price;
     product.Actions.push_back({ .Action = ShopAction::Gold, .Param1 = int32(std::min<uint64>(uint64(listing.Gold) * GOLD, std::numeric_limits<int32>::max())) });
@@ -160,7 +160,7 @@ void WorldSession::SendShopDistributionList()
         token.DeliverableID = 900001;
         token.Type = 39;                // HardcoreCharacterTransfer
         token.Flags = 0x400;            // character service token
-        token.Name = "Hardcore Character Transfer";
+        token.Name = "Перенос хардкорного персонажа";
     }
 
     // character boost tokens of the account (auth.account_boost_token): a boost button for each boost type on the character screen
@@ -189,7 +189,7 @@ WorldPackets::BattlePay::DistributionObject WorldSession::MakeBoostDistribution(
     boost.DeliverableID = distribution.DeliverableID;
     boost.Type = 1;
     boost.BoostID = int32(boostType);
-    boost.Name = "Character Boost";
+    boost.Name = "Буст персонажа";
     return distribution;
 }
 
@@ -210,13 +210,13 @@ void WorldSession::HandleBattlePayDistributionAssignToTarget(WorldPackets::Battl
     QueryResult character = CharacterDatabase.PQuery("SELECT level, class FROM characters WHERE guid = {} AND account = {} AND deleteDate IS NULL",
         assign.TargetCharacter.GetCounter(), GetAccountId());
     if (!token)
-        error = "no such boost";
+        error = "такого буста нет";
     else if (!character)
-        error = "not your character";
+        error = "это не ваш персонаж";
     else if ((*character)[0].GetUInt8() >= boostLevel)
-        error = "the character is already at that level";
+        error = "персонаж уже достиг этого уровня";
     else if (ObjectAccessor::FindConnectedPlayer(assign.TargetCharacter))
-        error = "log out the character first";
+        error = "сначала выйдите из игры этим персонажем";
 
     TC_LOG_INFO("entities.player", "Shop: boost token {} (type {}) for {} by account {}, spec choice {}: {}", tokenId, boostType,
         assign.TargetCharacter.ToString(), GetAccountId(), assign.ProductChoice, error.empty() ? "ok" : error);
@@ -272,7 +272,7 @@ void WorldSession::HandleBattlePayDistributionAssignToTarget(WorldPackets::Battl
     CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
     for (std::size_t i = 0; i < stacks.size() || (i == 0 && gold); i += MAX_MAIL_ITEMS)
     {
-        MailDraft draft("Character Boost", "Your character has been boosted. Here is your gear.");
+        MailDraft draft("Буст персонажа", "Ваш персонаж получил буст. Вот его снаряжение.");
         if (i == 0 && gold)
             draft.AddMoney(gold);
         for (std::size_t j = i; j < std::min(stacks.size(), i + MAX_MAIL_ITEMS); ++j)
@@ -443,11 +443,11 @@ void WorldSession::HandleBattlePayDistributionAssignVas(WorldPackets::BattlePay:
 
     std::string_view error;
     if (!sConfigMgr->GetBoolDefault("Classic.Shop.Enabled", false))
-        error = "the shop is closed";
+        error = "магазин закрыт";
     else if (!targetRealm)
-        error = "unknown destination";
+        error = "неизвестный реалм назначения";
     else if (!IsLegitCharacterForAccount(assign.Character))
-        error = "not your character";
+        error = "это не ваш персонаж";
     else
         error = CheckCharacterTransfer(GetAccountId(), assign.Character, targetAddress);
 
@@ -554,7 +554,7 @@ void WorldSession::SendShopProductList()
             group.GroupID = GoldMarketGroupID;
             group.IconFileDataID = 133784;
             group.Ordering = 1000;
-            group.Name = "Gold Market";
+            group.Name = "Золотой рынок";
 
             int32 ordering = 0;
             do
@@ -648,7 +648,7 @@ WorldPackets::BattlePay::Purchase MakeShopPurchase(uint64 purchaseId, ShopProduc
     purchase.BasePrice = ShopPriceFixedPoint(product.Price);
     purchase.UserPrice = ShopPriceFixedPoint(product.Price);
     purchase.TimeCreated = timeCreated;
-    purchase.WalletName = Trinity::StringFormat("Shop points: {}", points);
+    purchase.WalletName = Trinity::StringFormat("Игровые бонусы: {}", points);
     return purchase;
 }
 
@@ -658,11 +658,11 @@ std::string_view CheckCharacterTransfer(uint32 accountId, ObjectGuid character, 
     uint32 sourceRealm = sRealmList->GetCurrentRealmId().Realm;
     uint32 targetRealm = Battlenet::RealmHandle(destinationRealmAddress).Realm;
     if (targetRealm == sourceRealm)
-        return "the character is already on that realm";
+        return "персонаж уже на этом реалме";
     if (!LoginDatabase.PQuery("SELECT 1 FROM realmlist WHERE id = {}", targetRealm))
-        return "unknown realm";
+        return "неизвестный реалм";
     if (ObjectAccessor::FindConnectedPlayer(character))
-        return "log out the character first";
+        return "сначала выйдите из игры этим персонажем";
 
     {
         QueryResult rule = LoginDatabase.PQuery("SELECT DeadOnly FROM character_transfer_rule WHERE SourceRealm = {} AND TargetRealm = {}", sourceRealm, targetRealm);
@@ -722,7 +722,7 @@ AtLoginFlags GetShopServiceFlag(int32 service)
 std::string_view CheckShopProduct(ShopProduct const& product, Player const* player)
 {
     if (product.InGameOnly && !player)
-        return "log in with the character to buy this";
+        return "войдите в игру этим персонажем, чтобы купить";
 
     if (!player)
         return {};
@@ -733,24 +733,24 @@ std::string_view CheckShopProduct(ShopProduct const& product, Player const* play
         {
             case ShopAction::Spell:
                 if (player->HasSpell(action.Param1))
-                    return "this character already knows it";
+                    return "персонаж уже знает это";
                 break;
             case ShopAction::Service:
                 if ((ShopService(action.Param1) == ShopService::RaceChange || ShopService(action.Param1) == ShopService::FactionChange) && player->GetLevel() < 10)
-                    return "the character must be level 10";
+                    return "персонаж должен быть 10 уровня";
                 break;
             case ShopAction::Profession:
                 // only raises a profession the character already has (primary or secondary), it never takes a profession slot
                 if (!player->HasSkill(action.Param1))
-                    return "the character must learn this profession first";
+                    return "сначала изучите эту профессию";
                 break;
             case ShopAction::Level:
                 if (player->GetLevel() >= action.Param1)
-                    return "the character is already at that level";
+                    return "персонаж уже достиг этого уровня";
                 break;
             case ShopAction::Title:
                 if (player->HasTitle(sCharTitlesStore.LookupEntry(action.Param1)))
-                    return "this character already has the title";
+                    return "у персонажа уже есть этот титул";
                 break;
             default:
                 break;
@@ -786,7 +786,7 @@ void ApplyShopProduct(ShopProduct const& product, Player* player, ObjectGuid tar
         CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
         for (std::size_t i = 0; i < stacks.size(); i += MAX_MAIL_ITEMS)
         {
-            MailDraft draft("Shop purchase", Trinity::StringFormat("Thank you for buying {}.", product.Name));
+            MailDraft draft("Покупка в магазине", Trinity::StringFormat("Спасибо за покупку: {}.", product.Name));
             for (std::size_t j = i; j < std::min(stacks.size(), i + MAX_MAIL_ITEMS); ++j)
             {
                 if (Item* item = Item::CreateItem(stacks[j].first, stacks[j].second, ItemContext::NONE, receiver))
@@ -900,15 +900,15 @@ void WorldSession::StartShopPurchase(uint32 clientToken, uint32 productId, Objec
 
     std::string_view error;
     if (!sConfigMgr->GetBoolDefault("Classic.Shop.Enabled", false) || !product)
-        error = "the product is not available";
+        error = "товар недоступен";
     else if (target.IsEmpty() || !IsLegitCharacterForAccount(target))
-        error = "no character selected";
+        error = "не выбран персонаж";
     else if (points < product->Price)
-        error = "not enough shop points";
+        error = "недостаточно бонусов";
     else if (listing && listing->SellerAccount == GetAccountId())
-        error = "this is your own listing";
+        error = "это ваш собственный лот";
     else if (isTransfer != (transferRealmAddress != 0))
-        error = "pick the character and the realm in the transfer window";
+        error = "выберите персонажа и реалм в окне переноса";
     else if (isTransfer)
         error = CheckCharacterTransfer(GetAccountId(), target, transferRealmAddress);
     else
@@ -918,7 +918,7 @@ void WorldSession::StartShopPurchase(uint32 clientToken, uint32 productId, Objec
     {
         TC_LOG_DEBUG("network", "Shop: account {} could not buy product {}: {} (points {})", GetAccountId(), productId, error, points);
         if (_player)
-            ChatHandler(this).SendSysMessage(Trinity::StringFormat("Shop: {} (you have {} points, the price is {}).", error, points, product ? product->Price : 0));
+            ChatHandler(this).SendSysMessage(Trinity::StringFormat("Магазин: {} (у вас {} бонусов, цена — {}).", error, points, product ? product->Price : 0));
         // purchase id 0: the client raises the purchase error; any other id makes it wait for a confirmation ("Connecting to Shop")
         response.PurchaseResult = ShopPurchaseResultError;
         response.PurchaseID = 0;
@@ -965,7 +965,7 @@ void WorldSession::HandleBattlePayConfirmPurchaseResponse(WorldPackets::BattlePa
         ShopProduct gone;
         gone.ID = pending.ProductID;
         if (_player && confirmPurchaseResponse.ConfirmPurchase)
-            ChatHandler(this).SendSysMessage("Shop: this offer is no longer available.");
+            ChatHandler(this).SendSysMessage("Магазин: это предложение больше недоступно.");
         WorldPackets::BattlePay::PurchaseUpdate update;
         update.Purchases.push_back(MakeShopPurchase(pending.PurchaseID, gone, ShopPurchaseStatusFinished,
             confirmPurchaseResponse.ConfirmPurchase ? ShopPurchaseResultError : 0, pending.TimeCreated, points));
@@ -997,7 +997,7 @@ void WorldSession::HandleBattlePayConfirmPurchaseResponse(WorldPackets::BattlePa
                 // a previous attempt charged the points but did not finish: never charge or deliver twice
                 result = ShopPurchaseResultError;
                 if (_player)
-                    ChatHandler(this).SendSysMessage("Shop: this purchase is already being processed. Contact support if the item did not arrive.");
+                    ChatHandler(this).SendSysMessage("Магазин: покупка уже обрабатывается. Если товар не пришёл, обратитесь в поддержку.");
             }
             else
             {
@@ -1012,11 +1012,11 @@ void WorldSession::HandleBattlePayConfirmPurchaseResponse(WorldPackets::BattlePa
                     if (_player)
                     {
                         if (debit.code == -2)
-                            ChatHandler(this).SendSysMessage("Shop: this game account is not linked to a site account. Link it on the site before buying.");
+                            ChatHandler(this).SendSysMessage("Магазин: игровой аккаунт не привязан к аккаунту на сайте. Привяжите его на сайте перед покупкой.");
                         else if (debit.code == -3)
-                            ChatHandler(this).SendSysMessage("Shop: not enough shop points.");
+                            ChatHandler(this).SendSysMessage("Магазин: недостаточно бонусов.");
                         else
-                            ChatHandler(this).SendSysMessage("Shop: could not charge shop points. Please try again later.");
+                            ChatHandler(this).SendSysMessage("Магазин: не удалось списать бонусы. Попробуйте позже.");
                     }
                 }
                 else
@@ -1040,7 +1040,7 @@ void WorldSession::HandleBattlePayConfirmPurchaseResponse(WorldPackets::BattlePa
                         if (listing->SellerAccount && listing->Price > fee)
                         {
                             ShopWallet::Result payout = ShopWallet::Credit(listing->SellerAccount, listing->Price - fee,
-                                Trinity::StringFormat("Gold Market: продажа лота {}", listing->ID),
+                                Trinity::StringFormat("Золотой рынок: продажа лота {}", listing->ID),
                                 Trinity::StringFormat("gold-sale-{}", listing->ID));
                             if (!payout.ok)
                                 TC_LOG_ERROR("entities.player", "Shop: Gold Market payout to account {} failed (code {})",
@@ -1063,7 +1063,7 @@ void WorldSession::HandleBattlePayConfirmPurchaseResponse(WorldPackets::BattlePa
 
                         TC_LOG_INFO("entities.player", "Shop: account {} bought product {} ({}) for {} points for {}", GetAccountId(), product->ID, product->Name, product->Price, pending.Target.ToString());
                         if (_player)
-                            ChatHandler(this).SendSysMessage(Trinity::StringFormat("Shop: thank you for buying {}. You have {} points left.", product->Name, points));
+                            ChatHandler(this).SendSysMessage(Trinity::StringFormat("Магазин: спасибо за покупку «{}». Осталось бонусов: {}.", product->Name, points));
                     }
                     catch (...)
                     {
@@ -1077,7 +1077,7 @@ void WorldSession::HandleBattlePayConfirmPurchaseResponse(WorldPackets::BattlePa
                         points = refund.ok ? refund.balance : GetShopPoints(GetAccountId());
                         result = ShopPurchaseResultError;
                         if (_player)
-                            ChatHandler(this).SendSysMessage("Shop: delivery failed, the shop points were refunded.");
+                            ChatHandler(this).SendSysMessage("Магазин: не удалось выдать товар, бонусы возвращены.");
                     }
                 }
             }
