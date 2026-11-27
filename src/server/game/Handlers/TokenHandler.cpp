@@ -16,6 +16,7 @@
  */
 
 #include "CharacterCache.h"
+#include "CharmInfo.h"
 #include "Chat.h"
 #include "Config.h"
 #include "DB2Stores.h"
@@ -29,10 +30,12 @@
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Opcodes.h"
+#include "Pet.h"
 #include "Player.h"
 #include "PlayerDump.h"
 #include "Random.h"
 #include "RealmList.h"
+#include "ShopBoost.h"
 #include "ShopWallet.h"
 #include "SpellMgr.h"
 #include "StringConvert.h"
@@ -41,6 +44,10 @@
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include <atomic>
+#include <algorithm>
+#include <mutex>
+#include <set>
+#include <unordered_map>
 
 void WorldSession::HandleCommerceTokenGetLog(WorldPackets::Token::CommerceTokenGetLog& commerceTokenGetLog)
 {
@@ -231,7 +238,6 @@ void WorldSession::HandleBattlePayDistributionAssignToTarget(WorldPackets::Battl
         return;
     }
 
-    uint8 classId = (*character)[1].GetUInt8();
     LoginDatabase.DirectPExecute("UPDATE account_boost_token SET UsedRealm = {}, UsedGuid = {}, UsedTime = NOW() WHERE ID = {}",
         sRealmList->GetCurrentRealmId().Realm, assign.TargetCharacter.GetCounter(), tokenId);
 
@@ -249,43 +255,9 @@ void WorldSession::HandleBattlePayDistributionAssignToTarget(WorldPackets::Battl
     // the character is offline: level in the database (stats, talent points and spells follow at login; spells from trainers)
     CharacterDatabase.DirectPExecute("UPDATE characters SET level = {}, xp = 0 WHERE guid = {}", boostLevel, assign.TargetCharacter.GetCounter());
     sCharacterCache->UpdateCharacterLevel(assign.TargetCharacter, boostLevel);
-
-    // the boost's items (world.shop_boost_item) and gold (Classic.Shop.BoostGold) by mail. RandomPropertyID = the "of the X" suffix
-    // (an ItemBonusList); Item::CreateItem adds none, so it is set here (0 = a random one from the item's pool, if it has one)
-    struct BoostStack { uint32 ItemId; uint32 Count; uint32 BonusList; };
-    std::vector<BoostStack> stacks;
-    if (QueryResult items = WorldDatabase.PQuery("SELECT ItemID, Count, RandomPropertyID FROM shop_boost_item WHERE BoostType = {} AND ClassID IN (0, {})", boostType, classId))
-    {
-        do
-        {
-            uint32 itemId = (*items)[0].GetUInt32();
-            ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
-            if (!proto)
-                continue;
-            uint32 maxStack = std::max<uint32>(proto->GetMaxStackSize(), 1);
-            for (uint32 left = std::max<uint32>((*items)[1].GetUInt32(), 1); left > 0; left -= std::min(left, maxStack))
-                stacks.push_back({ itemId, std::min(left, maxStack), (*items)[2].GetUInt32() });
-        } while (items->NextRow());
-    }
-
-    uint64 gold = uint64(std::max(sConfigMgr->GetIntDefault("Classic.Shop.BoostGold", 250), 0)) * GOLD;
-    CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
-    for (std::size_t i = 0; i < stacks.size() || (i == 0 && gold); i += MAX_MAIL_ITEMS)
-    {
-        MailDraft draft("Буст персонажа", "Ваш персонаж получил буст. Вот его снаряжение.");
-        if (i == 0 && gold)
-            draft.AddMoney(gold);
-        for (std::size_t j = i; j < std::min(stacks.size(), i + MAX_MAIL_ITEMS); ++j)
-            if (Item* item = Item::CreateItem(stacks[j].ItemId, stacks[j].Count, ItemContext::NONE, nullptr))
-            {
-                if (uint32 bonusList = stacks[j].BonusList ? stacks[j].BonusList : GenerateItemRandomBonusListId(stacks[j].ItemId))
-                    item->SetItemRandomBonusList(bonusList);
-                item->SaveToDB(trans);
-                draft.AddItem(item);
-            }
-        draft.SendMailTo(trans, MailReceiver(nullptr, assign.TargetCharacter.GetCounter()), MailSender(MAIL_NORMAL, UI64LIT(0), MAIL_STATIONERY_GM), MAIL_CHECK_MASK_NOT_RETURNABLE);
-    }
-    CharacterDatabase.CommitTransaction(trans);
+    // the set and the gold are given at the character's first login (ShopBoost::GrantBoostSet), together with the class spells and
+    // skills: worn at once, no trip to a mailbox
+    ShopBoost::MarkPending(assign.TargetCharacter.GetCounter(), boostType);
 
     WorldPackets::BattlePay::CharacterUpgradeState complete(SMSG_CHARACTER_UPGRADE_COMPLETE);
     complete.Character = assign.TargetCharacter;
@@ -1123,4 +1095,314 @@ void WorldSession::HandleBattlePayConfirmPurchaseResponse(WorldPackets::BattlePa
             complete.RealmName = (*realm)[0].GetString();
         SendPacket(complete.Write());
     }
+}
+
+namespace ShopBoost
+{
+namespace
+{
+std::mutex PendingLock;
+std::unordered_map<uint64, uint32> Pending;     // guid -> boost type
+std::atomic<PostBoostHook> PostHook{ nullptr };
+}
+
+void SetPostBoostHook(PostBoostHook hook)
+{
+    PostHook = hook;
+}
+
+void LoadPending()
+{
+    CharacterDatabase.DirectExecute("CREATE TABLE IF NOT EXISTS shop_boost_pending (guid BIGINT UNSIGNED NOT NULL PRIMARY KEY, boost_type INT UNSIGNED NOT NULL DEFAULT 6, boosted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB");
+
+    std::lock_guard<std::mutex> lock(PendingLock);
+    Pending.clear();
+    if (QueryResult result = CharacterDatabase.Query("SELECT guid, boost_type FROM shop_boost_pending"))
+        do
+        {
+            Pending[(*result)[0].GetUInt64()] = (*result)[1].GetUInt32();
+        } while (result->NextRow());
+    TC_LOG_INFO("server.loading", ">> Loaded {} boosted characters waiting for their class spells", Pending.size());
+}
+
+void MarkPending(uint64 guid, uint32 boostType)
+{
+    CharacterDatabase.DirectPExecute("REPLACE INTO shop_boost_pending (guid, boost_type) VALUES ({}, {})", guid, boostType);
+    std::lock_guard<std::mutex> lock(PendingLock);
+    Pending[guid] = boostType;
+}
+
+bool TakePending(uint64 guid, uint32& boostType)
+{
+    {
+        std::lock_guard<std::mutex> lock(PendingLock);
+        auto itr = Pending.find(guid);
+        if (itr == Pending.end())
+            return false;
+        boostType = itr->second;
+        Pending.erase(itr);
+    }
+    CharacterDatabase.PExecute("DELETE FROM shop_boost_pending WHERE guid = {}", guid);
+    return true;
+}
+
+namespace
+{
+// A granted pet is one the hunter has raised: a fresh tame is Rebellious (no training points), Unhappy and loses loyalty until it runs
+// away. The boost makes it a Best Friend, fed, and teaches the highest rank of each damage ability of its family that its level and
+// training points allow, with autocast on (the same as the bots' granted pet).
+void RaiseBoostPet(Pet* pet)
+{
+    pet->InitLoyalty(Pet::BEST_FRIEND, Pet::GetLoyaltyStartPoints(Pet::BEST_FRIEND));
+    pet->SetPower(POWER_HAPPINESS, Pet::HAPPINESS_MAX);
+
+    CreatureTemplate const* tpl = pet->GetCreatureTemplate();
+    CreatureFamilyEntry const* family = tpl && tpl->family ? sCreatureFamilyStore.LookupEntry(tpl->family) : nullptr;
+    if (!family)
+        return;
+
+    uint32 budget = pet->GetTrainingPointsTotal();
+    std::vector<uint32> learned;
+    std::set<uint32> chains;
+    for (uint8 line = 0; line < 2; ++line)
+    {
+        if (!family->SkillLine[line])
+            continue;
+        std::vector<SkillLineAbilityEntry const*> const* abilities = sDB2Manager.GetSkillLineAbilitiesBySkill(family->SkillLine[line]);
+        if (!abilities)
+            continue;
+        for (SkillLineAbilityEntry const* ability : *abilities)
+        {
+            uint32 const first = sSpellMgr->GetFirstSpellInChain(ability->Spell);
+            if (!Pet::GetSpellTrainingPoints(ability->Spell) || !chains.insert(first).second)
+                continue;
+            // the highest rank of the chain the pet's level reaches and the points pay for
+            uint32 best = 0;
+            for (uint32 id = first; id; id = sSpellMgr->GetNextSpellInChain(id))
+            {
+                SpellInfo const* info = sSpellMgr->GetSpellInfo(id, DIFFICULTY_NONE);
+                if (!info || info->SpellLevel > pet->GetLevel() || Pet::GetSpellTrainingPoints(id) > budget)
+                    break;
+                best = id;
+            }
+            SpellInfo const* info = best ? sSpellMgr->GetSpellInfo(best, DIFFICULTY_NONE) : nullptr;
+            if (!info || info->IsPositive() || !info->IsAutocastable())
+                continue;
+            bool damaging = false;
+            for (SpellEffectInfo const& eff : info->GetEffects())
+                damaging = damaging || eff.IsEffect(SPELL_EFFECT_SCHOOL_DAMAGE) || eff.IsEffect(SPELL_EFFECT_WEAPON_DAMAGE)
+                        || eff.IsEffect(SPELL_EFFECT_WEAPON_DAMAGE_NOSCHOOL) || eff.IsEffect(SPELL_EFFECT_NORMALIZED_WEAPON_DMG)
+                        || eff.IsEffect(SPELL_EFFECT_WEAPON_PERCENT_DAMAGE);
+            if (!damaging)
+                continue;
+            budget -= Pet::GetSpellTrainingPoints(best);
+            learned.push_back(best);
+        }
+    }
+
+    for (uint32 spellId : learned)
+    {
+        pet->learnSpell(spellId);
+        if (SpellInfo const* info = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE))
+        {
+            pet->ToggleAutocast(info, true);
+            if (CharmInfo* ci = pet->GetCharmInfo())
+                ci->SetSpellAutocast(info, true);
+        }
+    }
+    pet->UpdateTrainingPoints();
+}
+
+// a hunter without a pet gets a tamed beast of its faction's classic starter pair (Young Wolf, Dire Mottled Boar)
+bool GrantHunterPet(Player* player)
+{
+    if (player->GetClass() != CLASS_HUNTER || player->GetLevel() < 10)
+        return false;
+    // a pet already, summoned, dismissed or stabled
+    if (!player->GetPetGUID().IsEmpty() || player->GetTemporaryUnsummonedPetNumber())
+        return false;
+    if (PetStable const* stable = player->GetPetStable())
+        if (stable->CurrentPetIndex || !stable->UnslottedPets.empty()
+            || std::ranges::any_of(stable->ActivePets, [](Optional<PetStable::PetInfo> const& pet) { return pet.has_value(); })
+            || std::ranges::any_of(stable->StabledPets, [](Optional<PetStable::PetInfo> const& pet) { return pet.has_value(); }))
+            return false;
+    // where a pet can be summoned
+    if (!player->IsInWorld() || player->IsBeingTeleported() || !player->IsAlive() || player->IsInCombat() || player->IsInFlight()
+        || player->GetTransport() || player->IsMounted() || player->GetVehicle())
+        return false;
+
+    uint32 const entry = player->GetTeam() == ALLIANCE ? 299 : 3099;
+    CreatureTemplate const* tpl = sObjectMgr->GetCreatureTemplate(entry);
+    if (!tpl || !tpl->IsTameable(false, tpl->GetDifficulty(DIFFICULTY_NONE)))
+        return false;
+    // the steps of Spell::EffectTameCreature after the tame itself
+    Pet* pet = player->CreateTamedPetFrom(entry, /*spell_id=*/0);
+    if (!pet)
+        return false;
+    pet->GetMap()->AddToMap(pet->ToCreature());
+    player->SetMinion(pet, true);
+    RaiseBoostPet(pet);
+    pet->SavePetToDB(PET_SAVE_AS_CURRENT);
+    player->PetSpellInitialize();
+    // a teleport before the next save unsummons the pet and saves summonedPetNumber = 0: store it now
+    if (CharmInfo const* ci = pet->GetCharmInfo())
+        CharacterDatabase.DirectPExecute("UPDATE characters SET summonedPetNumber = {} WHERE guid = {}", ci->GetPetNumber(), player->GetGUID().GetCounter());
+    return true;
+}
+}
+
+uint32 LearnClassSpells(Player* player)
+{
+    uint32 total = 0;
+    // a spell's ReqAbility is often the previous rank or a spell of another trainer: repeat until a pass teaches nothing
+    for (int pass = 0; pass < 8; ++pass)
+    {
+        uint32 learned = 0;
+        for (auto const& [id, trainer] : sObjectMgr->GetTrainers())
+        {
+            if (trainer.GetType() == Trainer::Type::Tradeskill || trainer.GetType() == Trainer::Type::Pet)
+                continue;
+            learned += trainer.TeachAvailableSpellsFree(player);
+        }
+        total += learned;
+        if (!learned)
+            break;
+    }
+    // the level was raised in the database: level-range skills catch up with it
+    player->UpdateSkillsForLevel();
+
+    // weapon skills (and Defense, Unarmed): the proficiency spells above give the skill at 1; a player who trained and used them has
+    // five per level, the cap
+    static constexpr uint32 weaponSkills[] =
+    {
+        SKILL_SWORDS, SKILL_TWO_HANDED_SWORDS, SKILL_AXES, SKILL_TWO_HANDED_AXES, SKILL_MACES, SKILL_TWO_HANDED_MACES,
+        SKILL_POLEARMS, SKILL_STAVES, SKILL_DAGGERS, SKILL_FIST_WEAPONS, SKILL_BOWS, SKILL_GUNS, SKILL_CROSSBOWS,
+        176 /*Thrown*/, SKILL_WANDS, SKILL_UNARMED, SKILL_DEFENSE
+    };
+    for (uint32 skill : weaponSkills)
+    {
+        if (!player->HasSkill(skill))
+            continue;
+        uint16 const cap = std::max<uint16>(uint16(player->GetLevel() * 5), player->GetPureMaxSkillValue(skill));
+        if (player->GetPureSkillValue(skill) < cap || player->GetPureMaxSkillValue(skill) < cap)
+            player->SetSkill(skill, player->GetSkillStep(skill), cap, cap);
+    }
+
+    // the "Additional" talent tab (dual spec): the class trainers sell it for gold, the boost opens it
+    if (player->PurchaseClassicDualSpec())
+        ++total;
+
+    // vanilla riding as the trainer opens it: Apprentice (skill 75, the race's ground mount, +60%) from level 40, Journeyman (skill 150 and
+    // the race's swift mount, +100%) from level 60. (The trainer pass above leaves riding out, as it does for the bots.)
+    if (player->GetLevel() >= 40)
+    {
+        uint32 mountSpell = 0, swiftSpell = 0;
+        switch (player->GetRace())
+        {
+            case RACE_HUMAN:        mountSpell = 458;   swiftSpell = 23229; break;    // Brown Horse, Swift Brown Steed
+            case RACE_ORC:          mountSpell = 580;   swiftSpell = 23250; break;    // Timber Wolf, Swift Brown Wolf
+            case RACE_DWARF:        mountSpell = 6899;  swiftSpell = 23238; break;    // Brown Ram, Swift Brown Ram
+            case RACE_NIGHTELF:     mountSpell = 10793; swiftSpell = 23221; break;    // Striped Nightsaber, Swift Frostsaber
+            case RACE_UNDEAD_PLAYER:mountSpell = 17462; swiftSpell = 17465; break;    // Red Skeletal Horse, Green Skeletal Warhorse
+            case RACE_TAUREN:       mountSpell = 18990; swiftSpell = 23249; break;    // Brown Kodo, Great Brown Kodo
+            case RACE_GNOME:        mountSpell = 10873; swiftSpell = 23225; break;    // Red Mechanostrider, Swift Green Mechanostrider
+            case RACE_TROLL:        mountSpell = 8395;  swiftSpell = 23241; break;    // Emerald Raptor, Swift Blue Raptor
+            default: break;
+        }
+        uint16 const ridingSkill = player->GetLevel() >= 60 ? 150 : 75;
+        if (player->GetSkillValue(SKILL_RIDING) < ridingSkill)
+        {
+            if (!player->HasSkill(SKILL_RIDING))
+                if (SkillRaceClassInfoEntry const* rcInfo = sDB2Manager.GetSkillRaceClassInfo(SKILL_RIDING, player->GetRace(), player->GetClass()))
+                    player->LearnDefaultSkill(rcInfo);
+            player->SetSkill(SKILL_RIDING, ridingSkill / 75, ridingSkill, ridingSkill);
+            ++total;
+        }
+        for (uint32 spellId : { mountSpell, player->GetLevel() >= 60 ? swiftSpell : 0u })
+            if (spellId && !player->HasSpell(spellId))
+                if (SpellInfo const* info = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE); info && info->HasAura(SPELL_AURA_MOUNTED))
+                {
+                    player->LearnSpell(spellId, false);
+                    ++total;
+                }
+    }
+    // the hunter's pet: the class trainers teach Tame Beast, but a tame is a trip into the world
+    if (GrantHunterPet(player))
+        ++total;
+
+    // what a module adds (the bot module: quest-taught class abilities and the talent build)
+    if (PostBoostHook hook = PostHook.load())
+        hook(player);
+
+    return total;
+}
+
+uint32 GrantBoostSet(Player* player, uint32 boostType)
+{
+    // the boost's items (world.shop_boost_item). RandomPropertyID = the "of the X" suffix (an ItemBonusList); Item::CreateItem adds none,
+    // so it is set here (0 = a random one from the item's pool, if it has one)
+    struct SetStack { uint32 ItemId; uint32 Count; uint32 BonusList; bool Bag; };
+    std::vector<SetStack> stacks;
+    if (QueryResult items = WorldDatabase.PQuery("SELECT ItemID, Count, RandomPropertyID FROM shop_boost_item WHERE BoostType = {} AND ClassID IN (0, {})", boostType, uint32(player->GetClass())))
+    {
+        do
+        {
+            uint32 itemId = (*items)[0].GetUInt32();
+            ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
+            if (!proto)
+                continue;
+            uint32 maxStack = std::max<uint32>(proto->GetMaxStackSize(), 1);
+            for (uint32 left = std::max<uint32>((*items)[1].GetUInt32(), 1); left > 0; left -= std::min(left, maxStack))
+                stacks.push_back({ itemId, std::min(left, maxStack), (*items)[2].GetUInt32(), proto->GetContainerSlots() > 0 });
+        } while (items->NextRow());
+    }
+    // bags first, so the rest has somewhere to go
+    std::stable_sort(stacks.begin(), stacks.end(), [](SetStack const& a, SetStack const& b) { return a.Bag && !b.Bag; });
+
+    uint32 given = 0;
+    std::vector<Item*> leftovers;
+    for (SetStack const& stack : stacks)
+    {
+        Item* item = Item::CreateItem(stack.ItemId, stack.Count, ItemContext::NONE, player);
+        if (!item)
+            continue;
+        if (uint32 bonusList = stack.BonusList ? stack.BonusList : GenerateItemRandomBonusListId(stack.ItemId))
+            item->SetItemRandomBonusList(bonusList);
+
+        uint16 equipPos = 0;
+        ItemPosCountVec storePos;
+        if (player->CanEquipItem(NULL_SLOT, equipPos, item, false) == EQUIP_ERR_OK)
+            player->EquipItem(equipPos, item, true);
+        else if (player->CanStoreItem(NULL_BAG, NULL_SLOT, storePos, item, false) == EQUIP_ERR_OK)
+            player->StoreItem(storePos, item, true);
+        else
+        {
+            leftovers.push_back(item);
+            continue;
+        }
+        ++given;
+    }
+
+    // no room left: the rest by mail, as before
+    if (!leftovers.empty())
+    {
+        CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+        for (std::size_t i = 0; i < leftovers.size(); i += MAX_MAIL_ITEMS)
+        {
+            MailDraft draft("Буст персонажа", "В сумках не хватило места. Вот остальное снаряжение.");
+            for (std::size_t j = i; j < std::min(leftovers.size(), i + MAX_MAIL_ITEMS); ++j)
+            {
+                leftovers[j]->SaveToDB(trans);
+                draft.AddItem(leftovers[j]);
+            }
+            draft.SendMailTo(trans, MailReceiver(player, player->GetGUID().GetCounter()), MailSender(MAIL_NORMAL, UI64LIT(0), MAIL_STATIONERY_GM), MAIL_CHECK_MASK_NOT_RETURNABLE);
+        }
+        CharacterDatabase.CommitTransaction(trans);
+        given += uint32(leftovers.size());
+    }
+
+    if (uint64 gold = uint64(std::max(sConfigMgr->GetIntDefault("Classic.Shop.BoostGold", 250), 0)) * GOLD)
+        player->ModifyMoney(int64(gold));
+    return given;
+}
 }

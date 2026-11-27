@@ -33,6 +33,7 @@
 #include "Player.h"
 #include "RBAC.h"
 #include "Random.h"
+#include "ShopBoost.h"
 #include "ShopWallet.h"
 #include "StringFormat.h"
 #include "WorldSession.h"
@@ -330,6 +331,7 @@ public:
         CharacterDatabase.DirectExecute("DELETE p FROM character_pvp_talent p LEFT JOIN characters c ON c.guid = p.guid WHERE c.guid IS NULL");
 
         WorldSession::ProcessIncomingCharacterTransfers();
+        ShopBoost::LoadPending();
     }
 
     void OnUpdate(uint32 diff) override
@@ -345,8 +347,28 @@ private:
     uint32 _timer = 0;
 };
 
+// a character raised by a boost token (in the database, offline) gets what its class trainers teach at its first login
+class classic_boost_login : public PlayerScript
+{
+public:
+    classic_boost_login() : PlayerScript("classic_boost_login") { }
+
+    void OnLogin(Player* player, bool /*firstLogin*/) override
+    {
+        uint32 boostType = 0;
+        if (!ShopBoost::TakePending(player->GetGUID().GetCounter(), boostType))
+            return;
+
+        uint32 learned = ShopBoost::LearnClassSpells(player);     // first: the set needs the weapon and armor skills to be worn
+        uint32 items = ShopBoost::GrantBoostSet(player, boostType);
+        TC_LOG_INFO("entities.player", "Shop: boosted character {} ({}) learned {} class spells and skills, got {} items", player->GetName(), player->GetGUID().ToString(), learned, items);
+        ChatHandler(player->GetSession()).SendSysMessage(Trinity::StringFormat("Буст: изучено способностей и навыков вашего класса: {}, получено предметов: {} (снаряжение надето или лежит в сумках), золото зачислено.", learned, items));
+    }
+};
+
 void AddSC_classic_shop_commands()
 {
     new classic_shop_commandscript();
     new classic_character_transfer_world();
+    new classic_boost_login();
 }

@@ -23,6 +23,8 @@
 #include "Player.h"
 #include "PlayerbotMovement.h"
 #include "Api/BotSwim.h"
+#include "Api/PlayerbotAPI.h"
+#include "Handlers/ShopBoost.h"
 #include "ScriptMgr.h"
 #include "Services.h"
 #include "Util/ConfigReader.h"   // Services::Config().refresh() on `.reload config`
@@ -572,6 +574,28 @@ public:
 // so it never starts (no bot sessions, bot database or migrations), gets no world, player, unit, group or guild hook, has no
 // commands and no world update, and the path check below is not installed. Only read at start-up: a change needs a restart.
 // Playerbot.World.Enable is the second level: with the module on, it turns only the wandering world bots on or off.
+namespace
+{
+// The class talent build of a boosted player: the bots' own routine walks the trait tree and can answer Locked (world loop spacing,
+// combat), so it is asked again a few times.
+void ApplyBoostTalents(Player* player, int attempt)
+{
+    ::Playerbot::Result const result = ::Playerbot::API(player).apply_classic_talents();
+    TC_LOG_INFO("entities.player", "Shop: boosted character {} talent build, attempt {}: result {}", player->GetName(), attempt, uint32(result));
+    if ((result == ::Playerbot::Result::Locked || result == ::Playerbot::Result::NotReady) && attempt < 8)
+        player->m_Events.AddEventAtOffset([player, attempt]() { ApplyBoostTalents(player, attempt + 1); }, Milliseconds(3000));
+}
+
+// The in-game Store's boost (Handlers/ShopBoost.h) asks the bot module for what no trainer teaches: the class abilities quests give
+// (totems, forms, minions, ...) and the class's default talent build.
+void BoostClassExtras(Player* player)
+{
+    uint32 const quest = ::Playerbot::API(player).learn_class_quest_spells_free();
+    TC_LOG_INFO("entities.player", "Shop: boosted character {} learned {} quest-taught class spells", player->GetName(), quest);
+    ApplyBoostTalents(player, 1);
+}
+}
+
 void AddSC_playerbot_v2()
 {
     if (!sConfigMgr->GetBoolDefault("Playerbot.Enable", true))
@@ -580,6 +604,7 @@ void AddSC_playerbot_v2()
         return;
     }
 
+    ShopBoost::SetPostBoostHook(&BoostClassExtras);
     new playerbot_v2_world();
     new playerbot_v2_player();
     new playerbot_v2_unit();
