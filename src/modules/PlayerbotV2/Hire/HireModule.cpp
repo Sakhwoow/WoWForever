@@ -6,6 +6,7 @@
 #include "HireMgr.h"
 #include "HirePolicy.h"
 #include "../HireHooks.h"
+#include "../Api/BotLanguage.h"
 #include "../Bot/ClassTables.h"
 #include "../Fleet/OwnerRegistry.h"
 #include "../Services.h"
@@ -59,7 +60,7 @@ public:
         if (uint32 const max = HireMgr::LegendMaxPerAccount(); grade == Hire::Grade::Legend && max && hire.CountGrade(account, Hire::Grade::Legend) >= max)
         { why = Trinity::StringFormat("The cartel hires out {} Legend(s) to one hero at a time.", max); return false; }
         if (!me->HasEnoughMoney(price))
-        { why = Trinity::StringFormat("You need {} to hire a {}.", Hire::MoneyText(price), Hire::GradeName(grade)); return false; }
+        { why = Trinity::StringFormat("The {} costs {}: you cannot pay that.", Hire::GradeName(grade), Hire::MoneyText(price)); return false; }
         return true;
     }
 
@@ -98,6 +99,8 @@ public:
             handler->SetSentErrorMessage(true);
             return false;
         }
+        // RU-LAYER: the replies go out through the reply catalog (Util/BotLocaleRu.cpp), in the player's language.
+        Playerbot::BotLanguage::LocalizedHandler localized(handler); handler = localized.Get();
         Hire::Mode const mode = HireMgr::ConfigMode();
         if (word)
         {
@@ -119,11 +122,14 @@ public:
             HireMgr::Instance().SetOptedIn(sess->GetAccountId(), w == "on");
         }
         bool const must = HireMgr::Instance().MustHire(me);
+        // Prices as "Sellsword — 1g; Veteran — 3g": the reply catalog translates each part on its own, money included.
         std::string prices;
         for (Hire::Grade g : { Hire::Grade::Sellsword, Hire::Grade::Veteran, Hire::Grade::Legend })
             if (uint64 const p = HireMgr::PriceHere(me, g))
-                prices += Trinity::StringFormat("{}{} {}", prices.empty() ? "" : ", ", Hire::GradeName(g), Hire::MoneyText(p));
-        handler->PSendSysMessage("Hired bots: %s. One bot costs %s here; upkeep %u%% a day you call it.",
+                prices += Trinity::StringFormat("{}{} — {}", prices.empty() ? "" : "; ", Hire::GradeName(g), Hire::MoneyText(p));
+        if (prices.empty())
+            prices = "nobody";
+        handler->PSendSysMessage("Hired bots: %s. One bot here: %s. Upkeep %u%% a day you call it.",
                                  must ? "on (your companions come from the brokers)" : "off (bots are free)", prices.c_str(),
                                  HireMgr::ConfigPrices().upkeep_pct);
         return true;

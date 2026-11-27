@@ -1,5 +1,6 @@
 #include "HireBroker.h"
 #include "HireMgr.h"
+#include "../Api/BotLanguage.h"
 #include "../Fleet/OwnerRegistry.h"
 #include "../Services.h"
 #include "../Bot/ClassTables.h"
@@ -52,6 +53,10 @@ void StartMenu(Player* player)
 
 void AddOption(Player* player, std::string text, uint32 action, std::string confirm = {}, uint64 money = 0)
 {
+    // RU-LAYER: the option text and its purchase confirmation go to the client, so they are translated here, in the player's language.
+    Playerbot::Locale::Lang const lang = Playerbot::BotLanguage::LangOf(player);
+    text = Playerbot::Locale::Translate(lang, text);
+    confirm = Playerbot::Locale::Translate(lang, confirm);
     GossipMenu& menu = player->PlayerTalkClass->GetGossipMenu();
     int32 const id = kBrokerOptionId + int32(menu.GetMenuItemCount());
     menu.AddMenuItem(id, -1, GossipOptionNpc::None, std::move(text), 0, GossipOptionFlags::None, {}, 0, 0, false, money, std::move(confirm), {}, {},
@@ -120,7 +125,7 @@ char const* HiredLine(Hire::Broker broker)
 void Tell(Player* player, std::string const& text)
 {
     if (player && player->GetSession())
-        ChatHandler(player->GetSession()).SendSysMessage(text.c_str());
+        Playerbot::BotLanguage::LocalizedHandler(player->GetSession()).SendSysMessage(text.c_str());
 }
 
 void ListContracts(Player* player)
@@ -136,9 +141,10 @@ void ListContracts(Player* player)
         HireRecord const rec = HireMgr::Instance().RecordOf(id);
         uint64 const upkeep = Hire::UpkeepFor(prices, rec.price);
         ClassInfo const* c = FindClass(entry->Class);
-        Tell(player, Trinity::StringFormat("{}: level {} {} {}{}", entry->Name, uint32(entry->Level), c ? c->name : "",
-                                           Hire::GradeName(rec.grade),
-                                           upkeep ? " (" + Hire::MoneyText(upkeep) + " a day you call them)" : std::string()));
+        Tell(player, Trinity::StringFormat("{}: level {} {} {}", entry->Name, uint32(entry->Level), c ? c->name : "",
+                                           Hire::GradeName(rec.grade)));
+        if (upkeep)
+            Tell(player, Trinity::StringFormat("Upkeep: {} a day you call them.", Hire::MoneyText(upkeep)));
         ++n;
     }
     if (!n)
@@ -245,7 +251,7 @@ struct npc_fb_hire_broker : public ScriptedAI
             if (!msg.empty())
                 Tell(player, msg);
             if (ok)
-                me->Say(HiredLine(broker), LANG_UNIVERSAL, player);
+                me->Say(Playerbot::Locale::Translate(Playerbot::BotLanguage::LangOf(player), HiredLine(broker)), LANG_UNIVERSAL, player);
             return true;
         }
         CloseGossipMenuFor(player);

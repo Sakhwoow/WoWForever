@@ -1,4 +1,5 @@
 #include "HireHooks.h"
+#include "Api/BotLanguage.h"
 #include "Chat.h"
 #include "Creature.h"
 #include "Player.h"
@@ -22,6 +23,7 @@ std::atomic<HireHooks*> g_hooks{ nullptr };
 
 bool HireHooks::HandleCommand(ChatHandler* handler, Optional<std::string> /*word*/)
 {
+    Playerbot::BotLanguage::LocalizedHandler localized(handler); handler = localized.Get();
     handler->SendSysMessage("There are no hired bots on this server: companions are free.");
     handler->SetSentErrorMessage(true);
     return false;
@@ -50,7 +52,8 @@ struct npc_fb_hire_broker_off : public ScriptedAI
     {
         CloseGossipMenuFor(player);
         if (player->GetSession())
-            ChatHandler(player->GetSession()).SendSysMessage("This server has no hired bots: companions are free (.bot add, or the ForeverBots add-on).");
+            Playerbot::BotLanguage::LocalizedHandler(player->GetSession())
+                .SendSysMessage("This server has no hired bots: companions are free (.bot add, or the ForeverBots add-on).");
         return true;
     }
 };

@@ -1,4 +1,5 @@
 #include "HireMgr.h"
+#include "../Api/BotLanguage.h"
 #include "../Bot/ClassTables.h"
 #include "../Bot/Gear/OwnedGearPolicy.h"
 #include "Cell.h"
@@ -355,7 +356,8 @@ bool HireMgr::TakeUpkeep(Player* owner, BotId bot, std::string const& bot_name, 
     }
     Db().DirectPExecute("UPDATE playerbot_v2_character SET hire_paid_until = {} WHERE character_guid_low = {}", until, bot);
     if (fee && owner->GetSession())
-        ChatHandler(owner->GetSession()).PSendSysMessage("You paid %s %s for today.", bot_name.c_str(), Hire::MoneyText(fee).c_str());
+        Playerbot::BotLanguage::LocalizedHandler(owner->GetSession())
+            .PSendSysMessage("You paid %s %s for today.", bot_name.c_str(), Hire::MoneyText(fee).c_str());
     TC_LOG_INFO("playerbot.v2", "[hire] {} paid {} copper upkeep for {}", owner->GetName(), fee, bot_name);
     return true;
 }
