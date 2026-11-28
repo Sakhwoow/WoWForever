@@ -405,9 +405,17 @@ void WorldSession::DoLootRelease(Loot* loot)
 
 void WorldSession::DoLootReleaseAll()
 {
-    std::unordered_map<ObjectGuid, Loot*> lootView = _player->GetAELootView();
-    for (auto const& [lootGuid, loot] : lootView)
-        DoLootRelease(loot);
+    // Walk loot guids and look each loot up again: a release can free another loot of this player (releasing an item's loot
+    // destroys the item, and an item that was never saved is deleted at once with the loot it owns), and a snapshot of loot
+    // pointers would then release a freed loot.
+    std::vector<ObjectGuid> lootGuids;
+    lootGuids.reserve(_player->GetAELootView().size());
+    for (auto const& [lootGuid, loot] : _player->GetAELootView())
+        lootGuids.push_back(lootGuid);
+
+    for (ObjectGuid const& lootGuid : lootGuids)
+        if (Loot* loot = Trinity::Containers::MapGetValuePtr(_player->GetAELootView(), lootGuid))
+            DoLootRelease(loot);
 }
 
 void WorldSession::HandleLootMasterGiveOpcode(WorldPackets::Loot::MasterLootItem& masterLootItem)

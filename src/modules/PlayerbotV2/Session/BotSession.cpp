@@ -3,6 +3,8 @@
 #include "LoginQueryHolder.h"
 #include "Log.h"
 #include "Group.h"
+#include "Item.h"
+#include "Loot.h"
 #include "Player.h"
 #include "WorldPacket.h"
 #include "WorldSocket.h"
@@ -45,6 +47,51 @@ uint32 ResolveBnetAccountId(uint32 gameAccountId)
     std::lock_guard lk(mtx);
     cache[gameAccountId] = bnet;
     return bnet;
+}
+
+// A headless bot has no client to take the result of its own Disenchanting, Prospecting or Milling and close the loot window. The window
+// stayed open on the item for ever; the bot then cast the same spell on the same item again, which replaced the loot and (through the
+// release of the old one) destroyed the item under the running spell. Do what the client does for these: take what fits, close the window.
+void CloseItemLootWindows(Player* p)
+{
+    std::vector<ObjectGuid> lootGuids;
+    for (auto const& [lootGuid, loot] : p->GetAELootView())
+        if (loot->GetOwnerGUID().IsItem() &&
+            (loot->loot_type == LOOT_DISENCHANTING || loot->loot_type == LOOT_PROSPECTING || loot->loot_type == LOOT_MILLING))
+            lootGuids.push_back(lootGuid);
+
+    for (ObjectGuid const& lootGuid : lootGuids)
+    {
+        auto const& view = p->GetAELootView();
+        auto itr = view.find(lootGuid);
+        if (itr == view.end())
+            continue;
+        Loot* loot = itr->second;
+
+        ObjectGuid const owner = loot->GetOwnerGUID();
+        for (uint8 slot = 0; slot < loot->items.size(); ++slot)
+        {
+            NotNormalLootItem* ffaItem = nullptr;
+            LootItem* it = loot->LootItemInSlot(slot, p, &ffaItem);
+            if (!it || it->is_looted || it->is_blocked)
+                continue;
+            if (ffaItem && ffaItem->is_looted)
+                continue;
+            ItemPosCountVec dest;
+            if (p->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, it->itemid, it->count) != EQUIP_ERR_OK)
+                continue;
+            p->StoreLootItem(owner, slot, loot);
+        }
+        if (loot->gold > 0)
+        {
+            p->ModifyMoney(loot->gold);
+            loot->gold = 0;
+        }
+
+        // The release destroys the item and may free the loot: nothing below reads it.
+        if (WorldSession* sess = p->GetSession())
+            sess->DoLootRelease(loot);
+    }
 }
 } // namespace
 
@@ -158,6 +205,9 @@ bool BotSession::Update(uint32 /*diff*/, PacketFilter& updater)
     // run the parts that DO matter (query holder callbacks for the async
     // login + any deferred work) and return true.
     ProcessQueryCallbacks();
+
+    if (_player && _player->IsInWorld() && !m_playerLogout && !forceExit && !_player->GetAELootView().empty())
+        CloseItemLootWindows(_player);
 
     // Sign guild charters players offered to this bot (see SendPacket).
     if (!_offeredCharters.empty())

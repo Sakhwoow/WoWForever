@@ -797,12 +797,11 @@ void Loot::NotifyItemRemoved(uint8 lootListId, Map const* map)
         }
 
         if (Player* player = ObjectAccessor::GetPlayer(map, *itr))
-        {
             player->SendNotifyLootItemRemoved(GetGUID(), GetOwnerGUID(), lootListId);
-            ++itr;
-        }
-        else
-            itr = PlayersLooting.erase(itr);
+
+        // A looter that is not found on this map is kept: its loot view still points at this loot, and only ~Loot (through
+        // PlayersLooting) can still clear that pointer.
+        ++itr;
     }
 }
 
@@ -812,12 +811,10 @@ void Loot::NotifyMoneyRemoved(Map const* map)
     for (auto itr = PlayersLooting.begin(); itr != PlayersLooting.end();)
     {
         if (Player* player = ObjectAccessor::GetPlayer(map, *itr))
-        {
             player->SendNotifyLootMoneyRemoved(GetGUID());
-            ++itr;
-        }
-        else
-            itr = PlayersLooting.erase(itr);
+
+        // see NotifyItemRemoved: a looter that is not found on this map is kept
+        ++itr;
     }
 }
 

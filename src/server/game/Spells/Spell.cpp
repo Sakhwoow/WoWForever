@@ -8224,6 +8224,11 @@ SpellCastResult Spell::CheckItems(int32* param1 /*= nullptr*/, int32* param2 /*=
                 if (!itemProto)
                     return SPELL_FAILED_CANT_BE_SALVAGED;
 
+                // The loot of an earlier cast on this item is still open. Closing it destroys the item, so a second cast would
+                // replace the loot (and with it the item) under its own spell effect.
+                if (item->m_loot)
+                    return SPELL_FAILED_ALREADY_OPEN;
+
                 Optional<uint16> disenchantSkillRequired = item->GetDisenchantSkillRequired();
                 if (!disenchantSkillRequired)
                     return SPELL_FAILED_CANT_BE_SALVAGED;
@@ -8273,6 +8278,9 @@ SpellCastResult Spell::CheckItems(int32* param1 /*= nullptr*/, int32* param2 /*=
                 //prevent prospecting in trade slot
                 if (item->GetOwnerGUID() != player->GetGUID())
                     return SPELL_FAILED_CANT_BE_PROSPECTED;
+                // the loot of an earlier cast on this stack is still open (see SPELL_EFFECT_DISENCHANT)
+                if (item->m_loot)
+                    return SPELL_FAILED_ALREADY_OPEN;
                 //Check for enough skill in jewelcrafting
                 uint32 item_prospectingskilllevel = item->GetTemplate()->GetRequiredSkillRank();
                 if (item_prospectingskilllevel > player->GetSkillValue(SKILL_JEWELCRAFTING))
@@ -8304,6 +8312,9 @@ SpellCastResult Spell::CheckItems(int32* param1 /*= nullptr*/, int32* param2 /*=
                 //prevent milling in trade slot
                 if (item->GetOwnerGUID() != player->GetGUID())
                     return SPELL_FAILED_CANT_BE_MILLED;
+                // the loot of an earlier cast on this stack is still open (see SPELL_EFFECT_DISENCHANT)
+                if (item->m_loot)
+                    return SPELL_FAILED_ALREADY_OPEN;
                 //Check for enough skill in inscription
                 uint32 item_millingskilllevel = item->GetTemplate()->GetRequiredSkillRank();
                 if (item_millingskilllevel > player->GetSkillValue(SKILL_INSCRIPTION))

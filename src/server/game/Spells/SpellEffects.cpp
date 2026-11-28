@@ -3637,6 +3637,12 @@ void Spell::EffectDisEnchant()
 
     if (Player* caster = m_caster->ToPlayer())
     {
+        // An earlier cast's loot is still on the item (CheckCast refuses this; a second cast started in the same tick can still get
+        // here). Replacing it releases the old loot, and that release destroys the item: the item, and the new loot the item
+        // owns, were freed under this effect, and the player's loot view kept a pointer to the freed loot.
+        if (itemTarget->m_loot)
+            return;
+
         if (!m_CastItem)
             caster->UpdateCraftSkill(m_spellInfo);
 
@@ -4753,6 +4759,10 @@ void Spell::EffectProspecting()
     if (itemTarget->GetCount() < 5)
         return;
 
+    // see EffectDisEnchant: never replace the loot of an earlier cast that can still be open
+    if (itemTarget->m_loot)
+        return;
+
     if (sWorld->getBoolConfig(CONFIG_SKILL_PROSPECTING))
     {
         uint32 SkillValue = player->GetPureSkillValue(SKILL_JEWELCRAFTING);
@@ -4884,6 +4894,10 @@ void Spell::EffectMilling()
         return;
 
     if (itemTarget->GetCount() < 5)
+        return;
+
+    // see EffectDisEnchant: never replace the loot of an earlier cast that can still be open
+    if (itemTarget->m_loot)
         return;
 
     if (sWorld->getBoolConfig(CONFIG_SKILL_MILLING))
