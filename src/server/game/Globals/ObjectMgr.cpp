@@ -883,7 +883,7 @@ void ObjectMgr::LoadShop()
     }
 
     //                                               0   1        2     3            4               5      6            7         8
-    if (QueryResult result = WorldDatabase.Query("SELECT ID, GroupID, Name, Description, IconFileDataID, Price, NormalPrice, Ordering, Realms, DisplayFlags FROM shop_product WHERE Enabled = 1"))
+    if (QueryResult result = WorldDatabase.Query("SELECT ID, GroupID, Name, Description, IconFileDataID, Price, NormalPrice, Ordering, Realms, DisplayFlags, Faction FROM shop_product WHERE Enabled = 1"))
     {
         do
         {
@@ -910,6 +910,7 @@ void ObjectMgr::LoadShop()
             product.NormalPrice = fields[6].GetUInt32();
             product.Ordering = fields[7].GetInt32();
             product.DisplayFlags = fields[9].GetUInt32();
+            product.Faction = fields[10].GetUInt8();
         } while (result->NextRow());
     }
 
@@ -964,6 +965,9 @@ void ObjectMgr::LoadShop()
                 case ShopAction::BoostToken:
                     if (action.Param1 <= 0)
                         action.Param1 = 6;
+                    break;
+                case ShopAction::Teleport:
+                    valid = action.Param1 > 0;      // the game_tele row is looked up when the product is bought (game_tele may load after the shop)
                     break;
                 default:
                     valid = false;

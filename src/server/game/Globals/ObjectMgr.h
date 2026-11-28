@@ -656,6 +656,7 @@ enum class ShopAction : uint8
     RealmTransfer = 9,  // character transfer to another realm (work in progress): the product is sent as a character service, so the
                         // Store opens its character / realm window
     BoostToken  = 10,   // Param1 boost type (6 = level 60): a character boost button on the character screen (auth.account_boost_token)
+    Teleport    = 11,   // Param1 game_tele id: the character is teleported there at once (in game only)
 };
 
 enum class ShopService : int32
@@ -684,6 +685,7 @@ struct ShopProduct
     uint32 NormalPrice = 0;     // crossed-out price, 0 = no sale
     int32 Ordering = 0;
     uint32 DisplayFlags = 0;    // BattlepayDisplayFlags for the card; 0 = use Classic.Shop.DisplayFlags
+    uint8 Faction = 0;          // 0 = both factions, 1 = Alliance only, 2 = Horde only (shown and sold to that faction only)
     std::vector<ShopProductAction> Actions;
     bool InGameOnly = false;    // has actions that need the character in game (anything but items)
 };

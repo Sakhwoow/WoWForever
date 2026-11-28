@@ -475,6 +475,10 @@ void WorldSession::SendShopProductList()
         uint32 deliverableId = 0;
         for (auto const& [id, shopProduct] : sObjectMgr->GetShopProducts())
         {
+            // faction-only products (portals to a faction's cities) are shown to that faction; at the character screen everything is listed
+            if (_player && shopProduct.Faction && shopProduct.Faction != (_player->GetTeam() == ALLIANCE ? 1u : 2u))
+                continue;
+
             WorldPackets::BattlePay::DisplayInfo display;
             display.FileDataID = shopProduct.IconFileDataID;
             display.Name1 = shopProduct.Name;
@@ -699,10 +703,25 @@ std::string_view CheckShopProduct(ShopProduct const& product, Player const* play
     if (!player)
         return {};
 
+    if (product.Faction && product.Faction != (player->GetTeam() == ALLIANCE ? 1u : 2u))
+        return "этот товар недоступен вашей фракции";
+
     for (ShopProductAction const& action : product.Actions)
     {
         switch (action.Action)
         {
+            case ShopAction::Teleport:
+                if (!sObjectMgr->GetGameTele(uint32(action.Param1)))
+                    return "точка телепорта не найдена";
+                if (!player->IsAlive())
+                    return "нельзя телепортироваться мёртвым";
+                if (player->IsInCombat())
+                    return "нельзя телепортироваться в бою";
+                if (player->IsInFlight() || player->GetTransport())
+                    return "нельзя телепортироваться в полёте или на транспорте";
+                if (player->GetMap()->Instanceable())
+                    return "нельзя телепортироваться из подземелья или с поля боя";
+                break;
             case ShopAction::Spell:
                 if (player->HasSpell(action.Param1))
                     return "персонаж уже знает это";
@@ -842,6 +861,10 @@ void ApplyShopProduct(ShopProduct const& product, Player* player, ObjectGuid tar
             case ShopAction::Level:
                 player->GiveLevel(uint8(action.Param1));
                 player->SetXP(0);
+                break;
+            case ShopAction::Teleport:
+                if (GameTele const* tele = sObjectMgr->GetGameTele(uint32(action.Param1)))
+                    player->TeleportTo(tele->mapId, tele->position_x, tele->position_y, tele->position_z, tele->orientation);
                 break;
             case ShopAction::Title:
                 player->SetTitle(sCharTitlesStore.LookupEntry(action.Param1));
