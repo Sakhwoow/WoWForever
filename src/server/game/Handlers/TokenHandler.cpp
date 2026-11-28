@@ -1371,7 +1371,27 @@ uint32 GrantBoostSet(Player* player, uint32 boostType)
 
         uint16 equipPos = 0;
         ItemPosCountVec storePos;
-        if (player->CanEquipItem(NULL_SLOT, equipPos, item, false) == EQUIP_ERR_OK)
+        InventoryResult canEquip = player->CanEquipItem(NULL_SLOT, equipPos, item, false);
+        if (canEquip != EQUIP_ERR_OK && !stack.Bag)
+        {
+            // the slot is taken by the starting gear of a new character (legs, weapon...): move that item into the bags, then equip the boost's item
+            uint16 swapPos = 0;
+            if (player->CanEquipItem(NULL_SLOT, swapPos, item, true) == EQUIP_ERR_OK)
+            {
+                uint8 swapSlot = uint8(swapPos & 255);
+                if (Item* oldItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, swapSlot))
+                {
+                    ItemPosCountVec oldDest;
+                    if (player->CanStoreItem(NULL_BAG, NULL_SLOT, oldDest, oldItem, false) == EQUIP_ERR_OK)
+                    {
+                        player->RemoveItem(INVENTORY_SLOT_BAG_0, swapSlot, true);
+                        player->StoreItem(oldDest, oldItem, true);
+                        canEquip = player->CanEquipItem(NULL_SLOT, equipPos, item, false);
+                    }
+                }
+            }
+        }
+        if (canEquip == EQUIP_ERR_OK)
             player->EquipItem(equipPos, item, true);
         else if (player->CanStoreItem(NULL_BAG, NULL_SLOT, storePos, item, false) == EQUIP_ERR_OK)
             player->StoreItem(storePos, item, true);
